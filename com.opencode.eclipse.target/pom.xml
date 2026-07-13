@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.opencode.eclipse</groupId>
+    <artifactId>com.opencode.eclipse.parent</artifactId>
+    <version>0.2.3-SNAPSHOT</version>
+  </parent>
+  <artifactId>com.opencode.eclipse.target</artifactId>
+  <packaging>eclipse-target-definition</packaging>
+</project>

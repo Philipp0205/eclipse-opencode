@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="src" path="com.opencode.eclipse.core/src"/>
+	<classpathentry kind="src" path="com.opencode.eclipse.ui/src"/>
+	<classpathentry kind="src" path="test"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.core/target/com.opencode.eclipse.core-0.2.1-SNAPSHOT.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.feature/target/com.opencode.eclipse.feature-0.2.1-SNAPSHOT.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.repository/target/repository/artifacts.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.repository/target/repository/content.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.repository/target/repository/features/com.opencode.eclipse.feature_0.2.1.202607111843.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.repository/target/repository/plugins/com.opencode.eclipse.core_0.2.1.202607111843.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.repository/target/repository/plugins/com.opencode.eclipse.ui_0.2.1.202607111843.jar"/>
+	<classpathentry kind="lib" path="com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.1-SNAPSHOT.jar"/>
+	<classpathentry kind="output" path="com.opencode.eclipse.core/bin"/>
+</classpath>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+      id="com.opencode.eclipse.feature"
+      label="OpenCode for Eclipse"
+      version="0.2.3.qualifier"
+      provider-name="opencode">
+
+   <description>OpenCode AI chat integrated into Eclipse via the local opencode server.</description>
+
+   <plugin
+         id="com.opencode.eclipse.core"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+
+   <plugin
+         id="com.opencode.eclipse.ui"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+
+</feature>

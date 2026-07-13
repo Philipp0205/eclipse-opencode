@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>__CSS__</style>
+</head>
+<body>
+  <section id="welcome" class="welcome" aria-label="Welcome to OpenCode">
+    <svg class="opencode-logo" viewBox="0 0 234 42" role="img" aria-label="OpenCode">
+      <path d="M18 30H6V18H18V30Z" fill="#CFCECD"/><path d="M18 12H6V30H18V12ZM24 36H0V6H24V36Z" fill="#656363"/>
+      <path d="M48 30H36V18H48V30Z" fill="#CFCECD"/><path d="M36 30H48V12H36V30ZM54 36H36V42H30V6H54V36Z" fill="#656363"/>
+      <path d="M84 24V30H66V24H84Z" fill="#CFCECD"/><path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="#656363"/>
+      <path d="M108 36H96V18H108V36Z" fill="#CFCECD"/><path d="M108 12H96V36H90V6H108V12ZM114 36H108V12H114V36Z" fill="#656363"/>
+      <path d="M144 30H126V18H144V30Z" fill="#CFCECD"/><path d="M144 12H126V30H144V36H120V6H144V12Z" fill="currentColor"/>
+      <path d="M168 30H156V18H168V30Z" fill="#CFCECD"/><path d="M168 12H156V30H168V12ZM174 36H150V6H174V36Z" fill="currentColor"/>
+      <path d="M198 30H186V18H198V30Z" fill="#CFCECD"/><path d="M198 12H186V30H198V12ZM204 36H180V6H198V0H204V36Z" fill="currentColor"/>
+      <path d="M234 24V30H216V24H234Z" fill="#CFCECD"/><path d="M216 12V18H228V12H216ZM234 24H216V30H234V36H210V6H234V24Z" fill="currentColor"/>
+    </svg>
+    <p class="welcome-lead">Ask OpenCode to edit your files in build mode. OpenCode will automatically pick files to edit, run terminal commands, and iterate on errors.</p>
+    <p class="welcome-credit">Vibe coded with <span aria-label="love">♥</span> by Philipp Kurrle.<br>
+      For questions, bugs, and praise contact
+      <span class="email">philipp.kurrle@advantest.com</span> or reach out on Teams.
+    </p>
+  </section>
+  <main id="conversation" role="log" aria-live="polite" aria-label="OpenCode conversation"></main>
+  <script>
+    let pinned = true;
+    const root = document.getElementById('conversation');
+    const welcome = document.getElementById('welcome');
+    function updateWelcome() { welcome.hidden = root.children.length > 0; }
+    addEventListener('scroll', () => pinned = innerHeight + scrollY >= document.body.scrollHeight - 64);
+    function put(id, html) {
+      let node = document.getElementById(id);
+      if (!node) {
+        node = document.createElement('section');
+        node.id = id;
+        root.appendChild(node);
+      }
+      node.outerHTML = html;
+      updateWelcome();
+      if (pinned) scrollTo(0, document.body.scrollHeight);
+    }
+    function reset(html) {
+      root.innerHTML = html;
+      updateWelcome();
+      scrollTo(0, document.body.scrollHeight);
+      pinned = true;
+    }
+    function removeBlock(id) {
+      const node = document.getElementById(id);
+      if (node) node.remove();
+      updateWelcome();
+    }
+  </script>
+</body>
+</html>
