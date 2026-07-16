@@ -9,7 +9,7 @@ uses OpenCode's HTTP and SSE APIs directly through the JDK `HttpClient`.
 - Streaming agent chat with Build and Plan agents and provider/model selection.
 - Rich Browser-based conversation rendering: Markdown, tables, code blocks,
   reasoning, tool calls, todos, dark/light themes, and long histories.
-- Active and open editor files are attached automatically, including selected
+- The active editor is attached automatically; **All open tabs** optionally includes every editor, including selected
   text, unsaved content, and Eclipse problem markers.
 - Paperclip attachment picker for Eclipse workspace files and folders.
 - OpenCode slash commands, custom commands, MCP prompts, and skills with fuzzy
@@ -46,7 +46,7 @@ click the OpenCode icon in Eclipse's bottom-right status trim.
 - Alt+Up/Alt+Down traverses prompt history.
 - Type `/` to search server and Eclipse slash commands.
 - The paperclip searches workspace resources; all currently open editor files
-  are attached automatically unless removed from the chip row.
+  are attached according to the active/all-tabs setting unless removed from the chip row.
 - The Settings toolbar button opens the global `opencode.json` in Eclipse's
   generic text editor. Its location follows `OPENCODE_CONFIG`, XDG on Linux,
   Application Support on macOS, and APPDATA on Windows.

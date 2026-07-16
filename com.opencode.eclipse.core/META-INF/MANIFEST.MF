@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: OpenCode Eclipse Core
 Bundle-SymbolicName: com.opencode.eclipse.core;singleton:=true
-Bundle-Version: 0.2.3.qualifier
+Bundle-Version: 0.2.5.qualifier
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Automatic-Module-Name: com.opencode.eclipse.core
 Import-Package: com.google.gson,

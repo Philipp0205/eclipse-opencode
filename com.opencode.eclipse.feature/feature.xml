@@ -2,7 +2,7 @@
 <feature
       id="com.opencode.eclipse.feature"
       label="OpenCode for Eclipse"
-      version="0.2.3.qualifier"
+      version="0.2.5.qualifier"
       provider-name="opencode">
 
    <description>OpenCode AI chat integrated into Eclipse via the local opencode server.</description>

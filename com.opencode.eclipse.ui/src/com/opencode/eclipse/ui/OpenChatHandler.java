@@ -9,7 +9,8 @@ import org.eclipse.ui.PlatformUI;
 public final class OpenChatHandler extends AbstractHandler {
 	@Override public Object execute(ExecutionEvent event) throws ExecutionException {
 		try {
-			PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView(ChatView.ID);
+			PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView(ChatView.ID,
+					java.util.UUID.randomUUID().toString(), org.eclipse.ui.IWorkbenchPage.VIEW_ACTIVATE);
 			return null;
 		} catch (Exception e) { throw new ExecutionException("Failed to open OpenCode Chat", e); }
 	}

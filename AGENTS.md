@@ -37,7 +37,9 @@ The whole-view probe must run from an Eclipse workspace with the PDE projects im
 - This is a five-module Eclipse Tycho build. `com.opencode.eclipse.target/opencode.target` is the dependency source of truth; the root `pom.xml` targets Linux, macOS, and Windows.
 - `com.opencode.eclipse.core/OpenCodeService` owns the `opencode serve` process and the REST/SSE protocol. It deliberately forces HTTP/1.1 because the JDK HTTP/2 upgrade hangs against OpenCode.
 - `com.opencode.eclipse.ui/ChatView` owns SWT state and worker/UI-thread handoff. Conversation rendering flows through `ConversationHtml` into one SWT `Browser` managed by `ConversationBrowser`; its packaged page assets are in `resources/`.
+- Multiple ChatView secondary instances each own an independent OpenCodeService/process. `SessionMonitorView` tracks live chat views and activates the selected one; status precedence is blocked, running, then done.
 - Session creation/listing is scoped with OpenCode's `directory` query to the Eclipse workspace root. Preserve this when adding session endpoints.
+- When `ENV_SCM_WORKSPACE_ROOT` is set, it replaces the Eclipse workspace root for the OpenCode process and all directory-scoped APIs, including the session list.
 - The selected session's returned `directory` is the status-line working folder. Keep session IDs out of the selector; expose them only in the selectable Info dialog.
 - OpenCode prompt runs are isolated per session. Prompt POST failures must close SSE; completion accepts current `session.status=idle` plus the legacy `session.idle` fallback.
 - Only mutate ChatView conversation/session state on the SWT thread. Worker callbacks must marshal through `ui(...)` and validate the turn/session they belong to.
@@ -50,7 +52,7 @@ The whole-view probe must run from an Eclipse workspace with the PDE projects im
 - At turn completion, fetch authoritative `GET /session/{id}/diff` data (scoped by directory) before reviewing changes. `file.edited` alone is insufficient because events or tool paths may be missing.
 - Permission and question list/reply endpoints must include the workspace `directory` query. Question radio controls need a separate SWT parent per question so groups do not interfere.
 - Global `opencode.json` is external to the Eclipse workspace. Resolve it through `OPENCODE_CONFIG`, XDG, macOS Application Support, or APPDATA, and explicitly open it with `org.eclipse.ui.DefaultTextEditor` using `FileStoreEditorInput`.
-- All open workspace and external file-editor inputs are attached by default. Refresh attachment chips on editor open/close/activation; preserve selected text, dirty document contents, and Eclipse problem markers in queued prompt snapshots.
+- The active editor is attached by default; **All open tabs** opt-in attaches every open workspace and external editor. Refresh attachment chips on editor open/close/activation; preserve selected text, dirty document contents, and Eclipse problem markers in queued prompt snapshots.
 - Keep PDE metadata synchronized with code: bundle dependencies belong in `META-INF/MANIFEST.MF`, packaged files in `build.properties`, and views/commands/handlers in `plugin.xml`.
 - The update site is emitted at `com.opencode.eclipse.repository/target/repository`.
 

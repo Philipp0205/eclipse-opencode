@@ -130,6 +130,8 @@ public final class OpenCodeService {
 
 	public synchronized void dispose() {
 		close(eventStream.getAndSet(null));
+		if (eventThread != null) eventThread.interrupt();
+		eventThread = null;
 		for (PromptRun run : prompts.values()) cancelRun(run);
 		prompts.clear();
 		if (process != null) {
@@ -144,6 +146,8 @@ public final class OpenCodeService {
 		}
 		baseUrl = null;
 		currentSessionId.set(null);
+		currentSessionTitle = "New Session";
+		currentSessionDirectory = null;
 	}
 
 	// ---- sessions ---------------------------------------------------------
@@ -189,7 +193,7 @@ public final class OpenCodeService {
 	}
 
 	public JsonArray getMessages(String sessionId) throws IOException {
-		return get("/session/" + sessionId + "/message").getAsJsonArray();
+		return get(activeSessionPath("/session/" + sessionId + "/message")).getAsJsonArray();
 	}
 
 	public JsonObject renameSession(String sessionId, String title) throws IOException {
@@ -206,7 +210,7 @@ public final class OpenCodeService {
 	}
 
 	public JsonArray getSessionTodos(String sessionId) throws IOException {
-		return get("/session/" + sessionId + "/todo").getAsJsonArray();
+		return get(activeSessionPath("/session/" + sessionId + "/todo")).getAsJsonArray();
 	}
 
 	public JsonObject forkSession(String sessionId, String messageId) throws IOException {
@@ -224,6 +228,17 @@ public final class OpenCodeService {
 
 	public JsonObject unshareSession(String sessionId) throws IOException {
 		return delete("/session/" + sessionId + "/share").getAsJsonObject();
+	}
+
+	public void moveSession(String sessionId, String directory) throws IOException {
+		post("/experimental/control-plane/move-session", moveSessionBody(sessionId, directory).toString());
+		currentSessionDirectory = directory;
+	}
+
+	static JsonObject moveSessionBody(String sessionId, String directory) {
+		JsonObject body = new JsonObject(); body.addProperty("sessionID", sessionId);
+		JsonObject destination = new JsonObject(); destination.addProperty("directory", directory);
+		body.add("destination", destination); body.addProperty("moveChanges", false); return body;
 	}
 
 	public JsonArray listPendingPermissions() throws IOException { return get("/permission").getAsJsonArray(); }
@@ -276,7 +291,7 @@ public final class OpenCodeService {
 	public boolean completeProviderAuth(String provider, int method, String code) throws IOException {
 		JsonObject body = new JsonObject(); body.addProperty("method", method);
 		if (code != null && !code.isBlank()) body.addProperty("code", code);
-		return post("/provider/" + enc(provider) + "/oauth/callback", body.toString()).getAsBoolean();
+		return post("/provider/" + enc(provider) + "/oauth/callback", body.toString(), Duration.ofMinutes(15)).getAsBoolean();
 	}
 
 	public boolean setProviderApiKey(String provider, String key) throws IOException {
@@ -353,7 +368,7 @@ public final class OpenCodeService {
 		if (sid == null) {
 			throw new IOException("No active session");
 		}
-		return get(sessionPath("/session/" + sid + "/diff")).getAsJsonArray();
+		return get(activeSessionPath("/session/" + sid + "/diff")).getAsJsonArray();
 	}
 
 	/** provider/model pair: the user override if set, else config, else a default. */
@@ -411,7 +426,7 @@ public final class OpenCodeService {
 	public void sendPromptStreaming(String text, Consumer<OpenCodeEvent> onEvent,
 			String sessionId, String agent) throws IOException, InterruptedException {
 		String body = promptBody(text, agent).toString();
-		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri("/session/" + sid + "/message"))
+		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri(activeSessionPath("/session/" + sid + "/message")))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
 				.build());
@@ -435,7 +450,7 @@ public final class OpenCodeService {
 			String sessionId, String agent, String model, String variant, List<FilePartInput> files)
 			throws IOException, InterruptedException {
 		JsonObject body = commandBody(command, arguments, agent, model, variant, files);
-		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri("/session/" + sid + "/command"))
+		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri(activeSessionPath("/session/" + sid + "/command")))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8)).build());
 	}
@@ -464,14 +479,15 @@ public final class OpenCodeService {
 	public synchronized void watchSessionEvents(Consumer<OpenCodeEvent> onEvent) {
 		if (eventThread != null && eventThread.isAlive()) return;
 		eventThread = new Thread(() -> {
+			AtomicReference<InputStream> watched = new AtomicReference<>();
 			try {
 				String dir = workspaceDir != null ? workspaceDir : System.getProperty("user.dir");
 				HttpRequest request = HttpRequest.newBuilder(uri("/event?directory=" + enc(dir)))
 						.header("Accept", "text/event-stream").GET().build();
 				HttpResponse<InputStream> response = http.send(request, BodyHandlers.ofInputStream());
 				if (response.statusCode() != 200) return;
-				eventStream.set(response.body());
-				try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+				InputStream stream = response.body(); watched.set(stream); eventStream.set(stream);
+				try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
 					String line;
 					while ((line = reader.readLine()) != null) if (line.startsWith("data:")) {
 						String json = line.substring(5).trim();
@@ -484,7 +500,7 @@ public final class OpenCodeService {
 				}
 			} catch (Exception ignored) {
 				// Server disposal closes the stream; the next view starts a new watcher.
-			} finally { eventStream.set(null); }
+			} finally { eventStream.compareAndSet(watched.get(), null); }
 		}, "opencode-session-events");
 		eventThread.setDaemon(true); eventThread.start();
 	}
@@ -500,7 +516,7 @@ public final class OpenCodeService {
 
 		boolean idle = false;
 		try {
-			String dir = workspaceDir != null ? workspaceDir : System.getProperty("user.dir");
+			String dir = activeDirectory();
 			HttpRequest sub = HttpRequest.newBuilder(uri("/event?directory=" + enc(dir)))
 					.header("Accept", "text/event-stream").GET().build();
 			HttpResponse<InputStream> resp = http.send(sub, BodyHandlers.ofInputStream());
@@ -602,9 +618,13 @@ public final class OpenCodeService {
 	}
 
 	private JsonElement post(String path, String body) throws IOException {
+		return post(path, body, Duration.ofSeconds(30));
+	}
+
+	private JsonElement post(String path, String body, Duration timeout) throws IOException {
 		return send(HttpRequest.newBuilder(uri(path))
 				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build());
+				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build(), timeout);
 	}
 
 	private JsonElement patch(String path, String body) throws IOException {
@@ -622,8 +642,12 @@ public final class OpenCodeService {
 	}
 
 	private JsonElement send(HttpRequest req) throws IOException {
+		return send(req, Duration.ofSeconds(30));
+	}
+
+	private JsonElement send(HttpRequest req, Duration timeout) throws IOException {
 		try {
-			req = HttpRequest.newBuilder(req, (name, value) -> true).timeout(Duration.ofSeconds(30)).build();
+			req = HttpRequest.newBuilder(req, (name, value) -> true).timeout(timeout).build();
 			HttpResponse<String> resp = http.send(req, BodyHandlers.ofString(StandardCharsets.UTF_8));
 			if (resp.statusCode() >= 400) {
 				throw new IOException("opencode " + req.method() + " " + req.uri().getPath()
@@ -647,6 +671,16 @@ public final class OpenCodeService {
 	private String sessionPath(String path) {
 		if (workspaceDir == null || workspaceDir.isBlank()) return path;
 		return path + (path.contains("?") ? "&" : "?") + "directory=" + enc(workspaceDir);
+	}
+
+	private String activeSessionPath(String path) {
+		String directory = activeDirectory();
+		return directory == null || directory.isBlank() ? path
+				: path + (path.contains("?") ? "&" : "?") + "directory=" + enc(directory);
+	}
+
+	private String activeDirectory() {
+		return currentSessionDirectory != null ? currentSessionDirectory : workspaceDir;
 	}
 
 	private static String enc(String s) {

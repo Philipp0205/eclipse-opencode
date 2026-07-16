@@ -19,6 +19,7 @@ public final class ChangedFilesBarTest {
 		ChangedFilesBar bar = new ChangedFilesBar(shell, diffs); shell.open();
 		bar.add(file.toString()); bar.reviewPending(); bar.reviewPending();
 		assert reviewed.equals(java.util.List.of(file.toString())) : reviewed;
+		assert bar.getChildren().length == 5 : "bar must remain one row";
 		shell.dispose(); display.dispose(); Files.deleteIfExists(file);
 		System.out.println("CHANGED FILES REVIEW OK");
 	}

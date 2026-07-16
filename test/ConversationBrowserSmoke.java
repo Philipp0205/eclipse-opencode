@@ -34,6 +34,9 @@ public final class ConversationBrowserSmoke {
 		assert Boolean.TRUE.equals(browser.evaluate("return document.querySelectorAll('.todo').length === 2;"));
 		assert Boolean.TRUE.equals(browser.evaluate("return document.querySelectorAll('table').length > 0;"));
 		assert Boolean.TRUE.equals(browser.evaluate("return document.querySelectorAll('.thinking').length > 0;"));
+		Object highlighted = browser.evaluate("return document.querySelectorAll('.hl-keyword').length;");
+		assert highlighted instanceof Double && ((Double) highlighted).intValue() >= 2 : highlighted + " / "
+				+ browser.evaluate("return document.querySelector('code') ? document.querySelector('code').outerHTML : 'missing';");
 		assert Boolean.TRUE.equals(browser.evaluate("return document.getElementById('welcome').hidden;"));
 		shell.dispose(); display.dispose();
 		System.out.println("CONVERSATION BROWSER OK messages=" + messages.size());
@@ -58,6 +61,7 @@ public final class ConversationBrowserSmoke {
 			}
 			if (i == 3) parts.add(todoPart());
 			if (i == 5) text.addProperty("text", "| A | B |\n|---|---|\n| 1 | 2 |");
+			if (i == 7) text.addProperty("text", "```java\npublic class Demo {}\n```");
 			message.add("parts", parts); messages.add(message);
 		}
 		return messages;

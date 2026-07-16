@@ -10,7 +10,8 @@ public final class SlashCommandsTest {
 		var skill = new CommandInfo("customize-opencode", "Customize", "skill", null, null, false, List.of());
 		var compact = new CommandInfo("compact", "Compact", "client", null, null, false, List.of());
 		var connect = new CommandInfo("connect", "Connect", "client", null, null, false, List.of());
-		List<CommandInfo> commands = List.of(review, skill, compact, connect);
+		var move = new CommandInfo("move", "Move", "client", null, null, false, List.of());
+		List<CommandInfo> commands = List.of(review, skill, compact, connect, move);
 		assert SlashCommands.filter(commands, "/rv").equals(List.of(review));
 		assert SlashCommands.filter(commands, "/review branch").isEmpty();
 		var invocation = SlashCommands.parse(commands, "/review branch name");
@@ -18,6 +19,7 @@ public final class SlashCommandsTest {
 		assert SlashCommands.parse(commands, "/unknown value") == null;
 		assert SlashCommands.parse(commands, "/compact").command().equals(compact);
 		assert SlashCommands.parse(commands, "/connect").command().equals(connect);
+		assert SlashCommands.parse(commands, "/move").command().equals(move);
 		System.out.println("SLASH COMMANDS OK");
 	}
 }

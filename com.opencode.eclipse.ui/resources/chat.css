@@ -32,6 +32,8 @@ p { margin:.45em 0; } h1,h2,h3 { margin:.8em 0 .35em; line-height:1.2; }
 pre { overflow:auto; padding:10px; border-radius:6px; background:var(--code); border:1px solid var(--border); }
 code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; background:var(--code); padding:1px 3px; border-radius:3px; }
 pre code { padding:0; background:none; }
+.hl-keyword { color:#cf222e; font-weight:600; }
+@media (prefers-color-scheme: dark) { .hl-keyword { color:#ff7b72; } }
 table { border-collapse:collapse; width:100%; display:block; overflow:auto; }
 th,td { border:1px solid var(--border); padding:6px 9px; text-align:left; } th { background:var(--tool); }
 blockquote { margin:.6em 0; padding-left:10px; border-left:3px solid var(--border); color:var(--muted); }

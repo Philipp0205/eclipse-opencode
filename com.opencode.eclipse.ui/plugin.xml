@@ -9,6 +9,14 @@
             icon="icons/opencode-16.png"
             category="com.opencode.eclipse.ui.category"
             class="com.opencode.eclipse.ui.ChatView"
+            allowMultiple="true"
+            restorable="true"/>
+      <view
+            id="com.opencode.eclipse.ui.sessionMonitorView"
+            name="OpenCode Sessions"
+            icon="icons/opencode-16.png"
+            category="com.opencode.eclipse.ui.category"
+            class="com.opencode.eclipse.ui.SessionMonitorView"
             restorable="true"/>
    </extension>
    <extension point="org.eclipse.ui.commands">

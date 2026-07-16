@@ -96,7 +96,9 @@ final class ConversationHtml {
 			return todos(part, state, input);
 		}
 		String detail = first(input, "filePath", "path", "pattern", "query", "url", "command", "description");
+		String skill = "skill".equals(tool) ? first(input, "name") : null;
 		return "<div class=\"tool\"><div class=\"tool-head\">" + escape(tool != null ? tool : "tool")
+				+ (skill != null ? " \"" + escape(skill) + "\"" : "")
 				+ (status != null ? " · " + escape(status) : "") + "</div>"
 				+ (detail != null ? "<div class=\"tool-detail\">" + escape(detail) + "</div>" : "")
 				+ (error != null ? "<div class=\"tool-error\">" + escape(error) + "</div>" : "") + "</div>";

@@ -3,6 +3,7 @@ package com.opencode.eclipse.ui;
 import java.net.URI;
 
 import org.eclipse.jface.dialogs.InputDialog;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Shell;
@@ -18,8 +19,11 @@ import com.opencode.eclipse.core.OpenCodeService;
 final class ConnectProviderDialog {
 	private final Shell shell;
 	private final OpenCodeService service;
+	private final Runnable connected;
 
-	ConnectProviderDialog(Shell shell, OpenCodeService service) { this.shell = shell; this.service = service; }
+	ConnectProviderDialog(Shell shell, OpenCodeService service, Runnable connected) {
+		this.shell = shell; this.service = service; this.connected = connected;
+	}
 
 	void open() {
 		try {
@@ -43,7 +47,7 @@ final class ConnectProviderDialog {
 
 	private void connectApi(String provider, JsonObject metadata) throws Exception {
 		String key = password("API key", "Enter the API key for " + provider);
-		if (key != null) service.setProviderApiKey(provider, key, metadata);
+		if (key != null && service.setProviderApiKey(provider, key, metadata)) connected.run();
 	}
 
 	private String password(String title, String message) {
@@ -66,12 +70,39 @@ final class ConnectProviderDialog {
 	private void connectOauth(String provider, int method, JsonObject inputs) throws Exception {
 		JsonObject auth = service.authorizeProvider(provider, method, inputs);
 		String url = Events.str(auth, "url");
-		if (url != null) PlatformUI.getWorkbench().getBrowserSupport().getExternalBrowser().openURL(URI.create(url).toURL());
-		if ("code".equals(Events.str(auth, "method"))) {
+		String instructions = Events.str(auth, "instructions");
+		String authMethod = Events.str(auth, "method");
+		if ("code".equals(authMethod)) {
+			if (url != null) PlatformUI.getWorkbench().getBrowserSupport().getExternalBrowser().openURL(URI.create(url).toURL());
 			InputDialog code = new InputDialog(shell, "Authorization code",
-					Events.str(auth, "instructions"), "", null);
-			if (code.open() == Window.OK) service.completeProviderAuth(provider, method, code.getValue());
+					instructions, "", null);
+			if (code.open() == Window.OK && service.completeProviderAuth(provider, method, code.getValue())) connected.run();
+		} else {
+			String code = deviceCode(instructions);
+			MessageDialog dialog = new MessageDialog(shell, "GitHub authorization", null,
+					instructions + "\n\nThe code will be copied before GitHub opens.", MessageDialog.INFORMATION,
+					new String[] { "Copy and Open", "Cancel" }, 0);
+			if (dialog.open() != 0) return;
+			copy(code);
+			if (url != null) PlatformUI.getWorkbench().getBrowserSupport().getExternalBrowser().openURL(URI.create(url).toURL());
+			new Thread(() -> {
+			try { if (service.completeProviderAuth(provider, method, null)) shell.getDisplay().asyncExec(connected); }
+			catch (Exception e) { shell.getDisplay().asyncExec(() -> MessageDialog.openError(shell,
+					"OpenCode connection", e.getMessage())); }
+			}, "opencode-provider-auth").start();
 		}
+	}
+
+	static String deviceCode(String instructions) {
+		if (instructions == null) return "";
+		var matcher = java.util.regex.Pattern.compile("(?i)enter code:\\s*([A-Z0-9-]+)").matcher(instructions);
+		return matcher.find() ? matcher.group(1) : instructions;
+	}
+
+	private void copy(String value) {
+		org.eclipse.swt.dnd.Clipboard clipboard = new org.eclipse.swt.dnd.Clipboard(shell.getDisplay());
+		try { clipboard.setContents(new Object[] { value }, new org.eclipse.swt.dnd.Transfer[] {
+				org.eclipse.swt.dnd.TextTransfer.getInstance() }); } finally { clipboard.dispose(); }
 	}
 
 	private JsonObject inputs(JsonObject method) {

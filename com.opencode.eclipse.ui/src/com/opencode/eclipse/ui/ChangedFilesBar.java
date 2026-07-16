@@ -8,6 +8,7 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Label;
 
 /** Compact review bar for files edited during the current turn. */
@@ -19,7 +20,7 @@ final class ChangedFilesBar extends Composite {
 	ChangedFilesBar(Composite parent, Diffs diffs) {
 		super(parent, SWT.BORDER); this.diffs = diffs;
 		setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-		setLayout(new GridLayout(3, false));
+		setLayout(new GridLayout(5, false));
 		setVisible(false); ((GridData) getLayoutData()).exclude = true;
 	}
 
@@ -40,16 +41,17 @@ final class ChangedFilesBar extends Composite {
 		boolean visible = !files.isEmpty(); setVisible(visible); ((GridData) getLayoutData()).exclude = !visible;
 		if (!visible) { getParent().layout(true, true); return; }
 		Label title = new Label(this, SWT.NONE); title.setText(files.size() + " changed file(s)");
-		new Label(this, SWT.NONE).setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+		Combo selected = new Combo(this, SWT.READ_ONLY);
+		String[] paths = files.toArray(String[]::new);
+		selected.setItems(java.util.Arrays.stream(paths).map(path -> Path.of(path).getFileName().toString()).toArray(String[]::new));
+		selected.select(0); selected.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+		Button review = new Button(this, SWT.PUSH | SWT.FLAT); review.setText("Review");
+		review.addListener(SWT.Selection, e -> diffs.openCompare(paths[selected.getSelectionIndex()]));
+		Button undo = new Button(this, SWT.PUSH | SWT.FLAT); undo.setText("Undo"); undo.addListener(SWT.Selection, e -> {
+			String path = paths[selected.getSelectionIndex()];
+			try { diffs.undo(path); files.remove(path); rebuild(); } catch (Exception ignored) { }
+		});
 		Button keep = new Button(this, SWT.PUSH | SWT.FLAT); keep.setText("Keep all"); keep.addListener(SWT.Selection, e -> reset());
-		for (String path : files) {
-			Button file = new Button(this, SWT.PUSH | SWT.FLAT); file.setText(Path.of(path).getFileName().toString());
-			file.setToolTipText(path); file.addListener(SWT.Selection, e -> diffs.openCompare(path));
-			new Label(this, SWT.NONE).setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-			Button undo = new Button(this, SWT.PUSH | SWT.FLAT); undo.setText("Undo"); undo.addListener(SWT.Selection, e -> {
-				try { diffs.undo(path); files.remove(path); rebuild(); } catch (Exception ignored) { }
-			});
-		}
 		layout(true, true); getParent().layout(true, true);
 	}
 }

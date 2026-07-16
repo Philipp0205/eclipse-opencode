@@ -4,7 +4,7 @@
   <parent>
     <groupId>com.opencode.eclipse</groupId>
     <artifactId>com.opencode.eclipse.parent</artifactId>
-    <version>0.2.3-SNAPSHOT</version>
+    <version>0.2.5-SNAPSHOT</version>
   </parent>
   <artifactId>com.opencode.eclipse.target</artifactId>
   <packaging>eclipse-target-definition</packaging>

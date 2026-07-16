@@ -27,6 +27,9 @@ public final class ConversationHtmlTest {
 		JsonObject failedTool = part("tool"); failedTool.addProperty("tool", "todowrite");
 		JsonObject failedState = new JsonObject(); failedState.addProperty("status", "error");
 		failedState.addProperty("error", "Missing key <todos>"); failedTool.add("state", failedState); parts.add(failedTool);
+		JsonObject skill = part("tool"); skill.addProperty("tool", "skill"); JsonObject skillState = new JsonObject();
+		JsonObject skillInput = new JsonObject(); skillInput.addProperty("name", "context7"); skillState.add("input", skillInput);
+		skillState.addProperty("status", "completed"); skill.add("state", skillState); parts.add(skill);
 		JsonObject subtask = part("subtask");
 		subtask.addProperty("agent", "explore"); subtask.addProperty("description", "Inspect source tree");
 		parts.add(subtask);
@@ -39,6 +42,9 @@ public final class ConversationHtmlTest {
 		assert html.contains("todo current") && html.contains("Current") : html;
 		assert html.contains("1 / 2 completed") && html.contains("todo cancelled") : html;
 		assert html.contains("tool-error") && html.contains("Missing key &lt;todos&gt;") : html;
+		assert html.contains("skill \"context7\" · completed") : html;
+		String code = MarkdownHtml.render("```java\nclass A {}\n```");
+		assert code.contains("class=\"language-java\"") && code.contains("hl-keyword") : code;
 		assert html.contains("Subagent · explore") && html.contains("Inspect source tree") : html;
 		assert !html.contains("<script>") && html.contains("&lt;script&gt;") : html;
 		System.out.println("CONVERSATION HTML OK");

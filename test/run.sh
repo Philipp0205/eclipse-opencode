@@ -22,14 +22,19 @@ javac -d "$out" -cp "$gson" \
 	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/Events.java" \
 	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ModelChoice.java" \
 	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ProviderAuthPrompts.java" \
-  "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ModelSearch.java" \
+	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/WorkspaceRoot.java" \
+	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/AttachmentSelection.java" \
+	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ModelSearch.java" \
 	"$here/ConversationHtmlTest.java" "$here/ModelSearchTest.java" "$here/ModelChoiceTest.java" \
-	"$here/ProviderAuthPromptsTest.java" "$here/EventsTest.java"
+	"$here/ProviderAuthPromptsTest.java" "$here/EventsTest.java" "$here/WorkspaceRootTest.java" \
+	"$here/AttachmentSelectionTest.java"
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.ConversationHtmlTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.ModelSearchTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.ModelChoiceTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.ProviderAuthPromptsTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.EventsTest
+java -ea -cp "$out:$gson" com.opencode.eclipse.ui.WorkspaceRootTest
+java -ea -cp "$out:$gson" com.opencode.eclipse.ui.AttachmentSelectionTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/OpenCodeRequestBodyTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.OpenCodeRequestBodyTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" \
@@ -41,7 +46,7 @@ javac -d "$out" -cp "$gson" "$root/com.opencode.eclipse.ui/src/com/opencode/ecli
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.QuestionAnswersTest
 
 if [[ -n "${DISPLAY:-}" && -n "$swt_api" && -n "$swt_gtk" ]]; then
-  plugin="$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.3-SNAPSHOT.jar"
+  plugin="$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar"
   eclipse_plugins=$(dirname "$swt_api")
   echo "== model picker lifecycle =="
   javac -d "$out" -cp "$swt_api:$swt_gtk" \
@@ -52,9 +57,11 @@ if [[ -n "${DISPLAY:-}" && -n "$swt_api" && -n "$swt_gtk" ]]; then
 	javac -d "$out" -cp "$out:$swt_api:$swt_gtk:$gson" \
 	  "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/TodoPanel.java" "$here/TodoPanelTest.java"
 	java -ea -cp "$out:$plugin:$swt_api:$swt_gtk:$gson" com.opencode.eclipse.ui.TodoPanelTest
-	javac -d "$out" -cp "$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.3-SNAPSHOT.jar:$eclipse_plugins/*" \
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson" "$here/SessionMonitorStateTest.java"
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson" com.opencode.eclipse.ui.SessionMonitorStateTest
+	javac -d "$out" -cp "$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar:$eclipse_plugins/*" \
 	  "$here/OpenSettingsPathTest.java"
-	java -ea -cp "$out:$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.3-SNAPSHOT.jar:$eclipse_plugins/*" \
+	java -ea -cp "$out:$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar:$eclipse_plugins/*" \
 	  com.opencode.eclipse.ui.OpenSettingsPathTest
 
   echo "== changed-file undo =="

@@ -2,7 +2,7 @@
 
 ## Runtime
 
-Each `ChatView` owns one `OpenCodeService`. The service starts:
+Each `ChatView`, including secondary view instances, owns one `OpenCodeService`. This keeps concurrent chats isolated. `SessionMonitorView` lists live chat views as running, blocked, or done and activates the selected view. The service starts:
 
 ```text
 opencode serve --port 0 --hostname 127.0.0.1
@@ -61,7 +61,7 @@ and dispatches the next message after completion or abort.
 
 ## Context And Edits
 
-All open workspace and external editor files are attached by default. Context
+The active workspace or external editor is attached by default; **All open tabs** opts into every editor. Context
 also includes active selection, dirty editor content, and Eclipse problem
 markers. Users can add workspace files/folders through a filtered Eclipse
 resource picker and remove attachments from the chip row.

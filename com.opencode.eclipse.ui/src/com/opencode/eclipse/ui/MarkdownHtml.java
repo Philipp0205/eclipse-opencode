@@ -16,13 +16,21 @@ final class MarkdownHtml {
 		String[] lines = markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
 		StringBuilder out = new StringBuilder();
 		boolean code = false, list = false;
+		String codeLanguage = "";
 		for (int i = 0; i < lines.length; i++) {
 			String line = lines[i];
 			if (line.startsWith("```")) {
 				if (list) { out.append("</ul>"); list = false; }
-				out.append(code ? "</code></pre>" : "<pre><code>"); code = !code; continue;
+				if (code) out.append("</code></pre>");
+				else {
+					String language = line.substring(3).trim().replaceAll("[^A-Za-z0-9_+-]", "");
+					codeLanguage = language;
+					out.append("<pre><code").append(language.isEmpty() ? "" : " class=\"language-" + language + "\"")
+							.append('>');
+				}
+				code = !code; continue;
 			}
-			if (code) { out.append(ConversationHtml.escape(line)).append('\n'); continue; }
+			if (code) { out.append(highlight(line, codeLanguage)).append('\n'); continue; }
 			if (i + 1 < lines.length && line.contains("|") && TABLE_DIVIDER.matcher(lines[i + 1]).matches()) {
 				if (list) { out.append("</ul>"); list = false; }
 				List<String> headers = cells(line); out.append("<table><thead><tr>");
@@ -56,6 +64,13 @@ final class MarkdownHtml {
 		if (list) out.append("</ul>");
 		if (code) out.append("</code></pre>");
 		return out.toString();
+	}
+
+	private static String highlight(String line, String language) {
+		String safe = ConversationHtml.escape(line);
+		if (language.isEmpty()) return safe;
+		return safe.replaceAll("\\b(class|interface|record|enum|public|private|protected|static|final|void|new|return|if|else|for|while|switch|case|try|catch|throw|throws|import|package|const|let|var|function|async|await|def|from|in|true|false|null|None)\\b",
+				"<span class=\"hl-keyword\">$1</span>");
 	}
 
 	private static List<String> cells(String line) {

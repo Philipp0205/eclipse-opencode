@@ -50,6 +50,8 @@ public final class ChatView extends ViewPart {
 			new CommandInfo("sessions", "Open the session selector", "client", null, null, false, List.of()),
 			new CommandInfo("new", "Start a new OpenCode session", "client", null, null, false, List.of()),
 			new CommandInfo("compact", "Compact the current OpenCode session", "client", null, null, false, List.of()),
+			new CommandInfo("move", "Move the current session to another directory", "client", null, null, false, List.of()),
+			new CommandInfo("restart", "Restart OpenCode to apply configuration changes", "client", null, null, false, List.of()),
 			new CommandInfo("mcps", "Show OpenCode MCP server status", "client", null, null, false, List.of()),
 			new CommandInfo("help", "Show available Eclipse slash commands", "client", null, null, false, List.of()));
 
@@ -97,6 +99,8 @@ public final class ChatView extends ViewPart {
 	private double sessionCost;
 	private String workingFolder;
 	private boolean providerConnected;
+	private boolean attachAllOpen;
+	private int interactionBlockers;
 	private int turnGeneration;
 	private String activeConversationActivity;
 	private String activeAssistantMessage;
@@ -135,6 +139,7 @@ public final class ChatView extends ViewPart {
 
 		startServerAsync();
 		installEditorListener();
+		publishMonitorState();
 	}
 
 	private void installEditorListener() {
@@ -186,6 +191,7 @@ public final class ChatView extends ViewPart {
 		bar.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 		new Label(bar, SWT.NONE).setText("Session:");
 		sessionButton = new Button(bar, SWT.PUSH | SWT.FLAT);
+		sessionButton.setAlignment(SWT.LEFT);
 		sessionButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 		sessionButton.addSelectionListener(new SelectionAdapter() {
 			@Override
@@ -300,6 +306,7 @@ public final class ChatView extends ViewPart {
 	private void createAttachedBar(Composite parent) {
 		attachedBar = new Composite(parent, SWT.NONE);
 		RowLayout rl = new RowLayout(SWT.HORIZONTAL);
+		rl.center = true;
 		rl.marginTop = 0;
 		rl.marginBottom = 0;
 		rl.wrap = true;
@@ -411,7 +418,7 @@ public final class ChatView extends ViewPart {
 								"**OpenCode is installed, but no AI provider is connected.**\n\nType `/connect` to sign in or add an API key.");
 					}
 					recoverInteractions(pendingPermissions, pendingQuestions);
-					if (Boolean.getBoolean("opencode.wholeViewProbe")) {
+					if (Boolean.getBoolean("opencode.wholeViewProbe") && getViewSite().getSecondaryId() == null) {
 						runWholeViewProbe();
 					}
 				});
@@ -458,8 +465,13 @@ public final class ChatView extends ViewPart {
 			@Override public void getName(org.eclipse.swt.accessibility.AccessibleEvent e) { e.result = "Add Context"; }
 		});
 		add.addListener(SWT.Selection, e -> addAttachment());
+		Button allTabs = new Button(attachedBar, SWT.CHECK); allTabs.setText("All open tabs");
+		allTabs.setSelection(attachAllOpen); allTabs.addListener(SWT.Selection, e -> {
+			attachAllOpen = allTabs.getSelection(); refreshAttached();
+		});
 		java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
-		open.stream().map(OpenEditors.Attached::path).filter(path -> !excludedAttachments.contains(path)).forEach(paths::add);
+		AttachmentSelection.select(open, OpenEditors.Attached::active, attachAllOpen).stream()
+				.map(OpenEditors.Attached::path).filter(path -> !excludedAttachments.contains(path)).forEach(paths::add);
 		paths.addAll(manualAttachments);
 		if (paths.isEmpty()) {
 			Label none = new Label(attachedBar, SWT.NONE);
@@ -496,7 +508,8 @@ public final class ChatView extends ViewPart {
 
 	private static String workspaceRoot() {
 		var root = org.eclipse.core.resources.ResourcesPlugin.getWorkspace().getRoot();
-		return root.getLocation() != null ? root.getLocation().toOSString() : System.getProperty("user.dir");
+		String eclipseRoot = root.getLocation() != null ? root.getLocation().toOSString() : System.getProperty("user.dir");
+		return WorkspaceRoot.resolve(System.getenv("ENV_SCM_WORKSPACE_ROOT"), eclipseRoot);
 	}
 
 	private void fillAgents(List<JsonObject> agents) {
@@ -518,6 +531,7 @@ public final class ChatView extends ViewPart {
 		allSessions.stream().filter(s -> s.get("id").getAsString().equals(current)).findFirst()
 				.ifPresent(s -> {
 					sessionButton.setText(sessionLabel(s));
+					setPartName(sessionLabel(s));
 					workingFolder = sessionDirectory(s);
 					updateStatus();
 				});
@@ -641,7 +655,8 @@ public final class ChatView extends ViewPart {
 			setStatus("Connect an AI provider first with /connect");
 			return;
 		}
-		List<OpenEditors.Attached> attached = new ArrayList<>(OpenEditors.all().stream()
+		List<OpenEditors.Attached> attached = new ArrayList<>(AttachmentSelection
+				.select(OpenEditors.all(), OpenEditors.Attached::active, attachAllOpen).stream()
 				.filter(item -> !excludedAttachments.contains(item.path())).toList());
 		for (String path : manualAttachments) if (attached.stream().noneMatch(item -> item.path().equals(path))) {
 			attached.add(new OpenEditors.Attached(path, false, null, null, List.of()));
@@ -660,6 +675,7 @@ public final class ChatView extends ViewPart {
 
 	private void dispatch(QueuedPrompt queued) {
 		busy = true;
+		publishMonitorState();
 		startActivity("Thinking");
 		conversation.putMessage(queued.id(), "user", queued.text());
 		roles.clear(); liveParts.clear();
@@ -690,6 +706,7 @@ public final class ChatView extends ViewPart {
 				ui(() -> {
 					if (turn == turnGeneration) {
 						busy = false;
+						publishMonitorState();
 						runningSessionId = null;
 						stopActivity();
 						drainQueue();
@@ -711,16 +728,51 @@ public final class ChatView extends ViewPart {
 			case "sessions" -> openSessionPicker();
 			case "new" -> newSessionAsync();
 			case "compact" -> compactSessionAsync();
+			case "move" -> moveSession();
+			case "restart" -> restartOpenCode();
 			case "mcps" -> new McpDialog(getSite().getShell(), service).open();
 			case "help" -> conversation.putMessage("client-help-" + System.nanoTime(), "assistant",
-					"**Eclipse commands:** `/models`, `/agents`, `/sessions`, `/new`, `/mcps`, `/help`\n\n"
+					"**Eclipse commands:** `/models`, `/agents`, `/sessions`, `/new`, `/move`, `/restart`, `/mcps`, `/help`\n\n"
 					+ "Project commands, MCP prompts, and skills are also available through `/`.");
 			case "connect" -> {
-				new ConnectProviderDialog(getSite().getShell(), service).open();
-				refreshProviderSetupAsync();
+				new ConnectProviderDialog(getSite().getShell(), service, this::refreshProviderSetupAsync).open();
 			}
 			default -> { }
 		}
+	}
+
+	private void restartOpenCode() {
+		if (busy || !promptQueue.isEmpty()) { setStatus("Finish current work before restarting OpenCode"); return; }
+		String session = service.getCurrentSessionId(); setStatus("Restarting OpenCode…"); spinner.start();
+		new Thread(() -> {
+			try {
+				service.dispose(); service.initialize(workspaceRoot());
+				try { if (session != null) service.switchSession(session); else service.createSession(); }
+				catch (Exception ignored) { service.createSession(); }
+				JsonArray sessions = service.listSessions(); JsonArray messages = service.getMessages(service.getCurrentSessionId());
+				List<JsonObject> agents = service.getAgents(); JsonObject providers = service.listProviders();
+				JsonObject config = service.getConfig(); List<CommandInfo> loadedCommands = service.listCommands();
+				ui(() -> {
+					spinner.stop(); fillSessions(sessions); renderHistory(messages); fillAgents(agents);
+					fillModels(providers, config.has("model") ? config.get("model").getAsString() : null);
+					List<CommandInfo> allCommands = new ArrayList<>(CLIENT_COMMANDS); allCommands.add(CONNECT_COMMAND);
+					allCommands.addAll(loadedCommands); commands = List.copyOf(allCommands);
+					service.watchSessionEvents(event -> ui(() -> onSessionEvent(event)));
+				});
+			} catch (Exception ex) { ui(() -> { spinner.stop(); setStatus("Restart failed: " + ex.getMessage()); }); }
+		}, "opencode-restart").start();
+	}
+
+	private void moveSession() {
+		org.eclipse.swt.widgets.DirectoryDialog dialog = new org.eclipse.swt.widgets.DirectoryDialog(getSite().getShell());
+		dialog.setText("Move OpenCode session"); dialog.setMessage("Select the destination directory");
+		dialog.setFilterPath(service.getCurrentSessionDirectory());
+		String destination = dialog.open(); if (destination == null) return;
+		String session = service.getCurrentSessionId();
+		new Thread(() -> {
+			try { service.moveSession(session, destination); ui(() -> { workingFolder = destination; updateStatus(); }); }
+			catch (Exception ex) { ui(() -> setStatus("Move failed: " + ex.getMessage())); }
+		}, "opencode-move").start();
 	}
 
 	private void refreshProviderSetupAsync() {
@@ -966,6 +1018,7 @@ public final class ChatView extends ViewPart {
 			return;
 		}
 		// once / always / reject via a 3-button dialog (Yes / No / Cancel).
+		interactionBlockers++; publishMonitorState();
 		MessageDialog d = new MessageDialog(getSite().getShell(), "OpenCode permission", null,
 				("Allow " + (permission != null ? permission : "this action") + "?"
 						+ (patterns != null && !patterns.isEmpty() ? "\n\n" + patterns : "")),
@@ -982,7 +1035,7 @@ public final class ChatView extends ViewPart {
 				service.respondToPermission(pid, response);
 			} catch (Exception ex) {
 				ui(() -> setStatus("Permission failed: " + ex.getMessage()));
-			}
+			} finally { ui(() -> { interactionBlockers--; publishMonitorState(); }); }
 		}, "opencode-perm").start();
 	}
 
@@ -992,6 +1045,7 @@ public final class ChatView extends ViewPart {
 		String requestId = str(props, "id");
 		JsonArray questions = props.getAsJsonArray("questions");
 		if (requestId == null || questions == null) return;
+		interactionBlockers++; publishMonitorState();
 		QuestionDialog dialog = new QuestionDialog(getSite().getShell(), questions);
 		boolean accepted = dialog.open() == org.eclipse.jface.window.Window.OK;
 		new Thread(() -> {
@@ -999,6 +1053,7 @@ public final class ChatView extends ViewPart {
 				if (accepted) service.replyQuestion(requestId, dialog.answers());
 				else service.rejectQuestion(requestId);
 			} catch (Exception ex) { ui(() -> setStatus("Question response failed: " + ex.getMessage())); }
+			finally { ui(() -> { interactionBlockers--; publishMonitorState(); }); }
 		}, "opencode-question").start();
 	}
 
@@ -1141,11 +1196,18 @@ public final class ChatView extends ViewPart {
 	private String metrics() {
 		String folder = workingFolder != null ? java.nio.file.Path.of(workingFolder).getFileName().toString() : "workspace";
 		String context = contextLimit > 0 ? Math.round(contextUsed * 100.0 / contextLimit) + "% context" : "context —";
-		return String.format(java.util.Locale.ROOT, "$%.4f · %s · %s", sessionCost, context, folder);
+		return String.format(java.util.Locale.ROOT, "$%.2f · %s · %s", sessionCost, context, folder);
 	}
 
 	private void updateStatus() {
 		setStatus((busy ? "Thinking · " : "Ready · ") + metrics());
+		publishMonitorState();
+	}
+
+	private void publishMonitorState() {
+		if (sessionButton == null || sessionButton.isDisposed()) return;
+		ChatViewRegistry.update(this, sessionButton.getText().isBlank() ? "New Session" : sessionButton.getText(),
+				ChatViewRegistry.status(busy, interactionBlockers));
 	}
 
 	private void navigatePromptHistory(int direction) {
@@ -1158,7 +1220,7 @@ public final class ChatView extends ViewPart {
 	private void showContext() {
 		String details = "Used tokens: " + contextUsed + "\nContext limit: " + contextLimit + "\nUsage: "
 				+ (contextLimit > 0 ? Math.round(contextUsed * 100.0 / contextLimit) + "%" : "unknown")
-				+ String.format(java.util.Locale.ROOT, "\nCost: $%.4f", sessionCost)
+				+ String.format(java.util.Locale.ROOT, "\nCost: $%.2f", sessionCost)
 				+ "\nWorking folder: " + workingFolder
 				+ "\nSession ID: " + service.getCurrentSessionId()
 				+ "\nConnected MCP servers: " + mcpServers;
@@ -1183,7 +1245,19 @@ public final class ChatView extends ViewPart {
 			probe(editor != null && OpenSettingsHandler.EDITOR_ID.equals(editor.getSite().getId()),
 					"settings opened in Eclipse text editor");
 		} catch (Exception e) { throw new AssertionError(e); }
-		probeTodoTool(() -> probeInputAndReply("WHOLE_VIEW_PROBE", this::probeFileEdit));
+		probeMultipleViews(() -> probeTodoTool(() -> probeInputAndReply("WHOLE_VIEW_PROBE", this::probeFileEdit)));
+	}
+
+	private void probeMultipleViews(Runnable next) {
+		try {
+			var page = getSite().getPage();
+			var secondary = page.showView(ID, "whole-view-secondary", org.eclipse.ui.IWorkbenchPage.VIEW_CREATE);
+			page.showView(SessionMonitorView.ID, null, org.eclipse.ui.IWorkbenchPage.VIEW_CREATE);
+			probeEventually("multiple chat views", 30_000, () -> ChatViewRegistry.snapshot().size() >= 2, () -> {
+				page.activate(secondary); probe(page.getActivePart() == secondary, "monitor target activates");
+				page.hideView(secondary); next.run();
+			});
+		} catch (Exception e) { throw new AssertionError(e); }
 	}
 
 	private void probeTodoTool(Runnable next) {
@@ -1208,9 +1282,9 @@ public final class ChatView extends ViewPart {
 		try { java.nio.file.Files.writeString(file, "before\n"); } catch (Exception e) { throw new AssertionError(e); }
 		input.setText("Edit whole_view_probe.txt so it contains exactly after");
 		send();
-		probeEventually("file edit", 120_000,
-				() -> !busy && java.nio.file.Files.exists(file) && readProbeFile(file).contains("after"),
-				this::probeAbortAndContinue);
+		probeEventually("file edit", 240_000,
+				() -> java.nio.file.Files.exists(file) && readProbeFile(file).contains("after"),
+				() -> probeEventually("file edit completes", 120_000, () -> !busy, this::probeAbortAndContinue));
 	}
 
 	private static String readProbeFile(java.nio.file.Path file) {
@@ -1300,6 +1374,7 @@ public final class ChatView extends ViewPart {
 
 	@Override
 	public void dispose() {
+		ChatViewRegistry.remove(this);
 		if (editorListener != null) getSite().getPage().removePartListener(editorListener);
 		if (slashPopup != null) slashPopup.close();
 		modelPicker.close();

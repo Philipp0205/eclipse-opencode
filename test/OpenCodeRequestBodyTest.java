@@ -16,6 +16,9 @@ public final class OpenCodeRequestBodyTest {
 		assert !OpenCodeService.apiKeyBody("secret", null).has("metadata");
 		JsonObject metadata = new JsonObject(); metadata.addProperty("region", "eu");
 		assert OpenCodeService.apiKeyBody("secret", metadata).getAsJsonObject("metadata").equals(metadata);
+		JsonObject move = OpenCodeService.moveSessionBody("ses_1", "/tmp/destination");
+		assert "ses_1".equals(move.get("sessionID").getAsString());
+		assert "/tmp/destination".equals(move.getAsJsonObject("destination").get("directory").getAsString());
 		System.out.println("OPENCODE REQUEST BODIES OK");
 	}
 }
