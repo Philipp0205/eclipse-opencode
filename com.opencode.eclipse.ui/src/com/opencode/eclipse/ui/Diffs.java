@@ -4,8 +4,12 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.LinkedHashMap;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 
 import org.eclipse.compare.CompareConfiguration;
 import org.eclipse.compare.CompareEditorInput;
@@ -26,16 +30,61 @@ import org.eclipse.swt.graphics.Image;
  */
 final class Diffs {
 
-	/** absolute path -> content captured before opencode's first edit this turn. */
+	/** absolute path -> the local, pre-edit snapshot used by the legacy edit events. */
 	private final Map<String, String> snapshots = new ConcurrentHashMap<>();
+	/** The last server response.  This is intentionally independent of the workspace. */
+	private final Map<String, ServerDiff> authoritative = new LinkedHashMap<>();
+	private volatile boolean authoritativeLoaded;
 	private final java.util.function.Consumer<String> reviewer;
 
 	Diffs() { this(null); }
 	Diffs(java.util.function.Consumer<String> reviewer) { this.reviewer = reviewer; }
 
+	/** Files in the currently displayed turn. Used by the /diff workbench view. */
+	List<String> currentFiles() { return files(); }
+
+	private List<String> files() {
+		synchronized (authoritative) {
+			if (authoritativeLoaded) return authoritative.keySet().stream().sorted().toList();
+		}
+		return snapshots.keySet().stream().filter(this::changed).sorted().toList();
+	}
+
 	/** Forget all snapshots (call at the start of each prompt turn). */
 	void reset() {
 		snapshots.clear();
+		synchronized (authoritative) { authoritative.clear(); }
+		authoritativeLoaded = false;
+	}
+
+	/** Replace the turn model with the authoritative session diff. */
+	void setAuthoritativeChanges(JsonArray changes, String workspaceRoot) {
+		var serverDiffs = new LinkedHashMap<String, ServerDiff>();
+		for (JsonElement element : changes) {
+			if (!element.isJsonObject()) continue;
+			var object = element.getAsJsonObject();
+			String file = string(object, "file");
+			if (file == null) continue;
+			Path path = Path.of(file);
+			if (!path.isAbsolute()) path = Path.of(workspaceRoot).resolve(path);
+			String absolute = path.normalize().toString();
+			serverDiffs.put(absolute, new ServerDiff(content(object, "before", "old", "beforeContent"),
+					content(object, "after", "new", "afterContent"), string(object, "patch")));
+		}
+		synchronized (authoritative) {
+			authoritative.clear();
+			authoritative.putAll(serverDiffs);
+		}
+		authoritativeLoaded = true;
+	}
+
+	/** Opens the workbench listing; this is deliberately not a dialog. */
+	static void openListing(Diffs model) {
+		try {
+			var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+			var view = window.getActivePage().showView(ChangedFilesView.ID, null, org.eclipse.ui.IWorkbenchPage.VIEW_ACTIVATE);
+			if (view instanceof ChangedFilesView changes) changes.bind(model);
+		} catch (Exception ignored) { }
 	}
 
 	/** Record the current on-disk content as the "before" if not already captured. */
@@ -43,19 +92,27 @@ final class Diffs {
 		snapshots.computeIfAbsent(absolutePath, path -> gitBefore(path));
 	}
 
-	boolean changed(String path) { return !snapshots.getOrDefault(path, gitBefore(path)).equals(readOrEmpty(path)); }
+	boolean changed(String path) {
+		synchronized (authoritative) {
+			ServerDiff diff = authoritative.get(path);
+			if (diff != null) return !diff.before.equals(diff.after);
+		}
+		return !snapshots.getOrDefault(path, gitBefore(path)).equals(readOrEmpty(path));
+	}
 
 	void undo(String absolutePath) throws java.io.IOException {
-		String before = snapshots.getOrDefault(absolutePath, gitBefore(absolutePath));
+		ServerDiff server = authoritative(absolutePath);
+		String before = server == null ? snapshots.getOrDefault(absolutePath, gitBefore(absolutePath)) : server.before;
 		Path path = Path.of(absolutePath);
-		if (before.isEmpty() && !tracked(path)) Files.deleteIfExists(path);
+		if (before.isEmpty() && (server != null || !tracked(path))) Files.deleteIfExists(path);
 		else { Files.createDirectories(path.getParent()); Files.writeString(path, before, StandardCharsets.UTF_8); }
 	}
 
 	/** Open a compare editor: snapshot (before) vs current file (after). Must run on UI thread. */
 	void openCompare(String absolutePath) {
-		String before = snapshots.getOrDefault(absolutePath, "");
-		String after = readOrEmpty(absolutePath);
+		ServerDiff server = authoritative(absolutePath);
+		String before = server == null ? snapshots.getOrDefault(absolutePath, "") : server.before;
+		String after = server == null ? readOrEmpty(absolutePath) : server.after;
 		if (before.equals(after)) {
 			return; // nothing changed
 		}
@@ -73,6 +130,24 @@ final class Diffs {
 			System.out.println("[OpenCodeProbe] PASS compare opened " + name);
 		}
 	}
+
+	private ServerDiff authoritative(String path) {
+		synchronized (authoritative) { return authoritative.get(path); }
+	}
+
+	private static String string(com.google.gson.JsonObject object, String name) {
+		return object.has(name) && !object.get(name).isJsonNull() ? object.get(name).getAsString() : null;
+	}
+
+	private static String content(com.google.gson.JsonObject object, String... names) {
+		for (String name : names) {
+			String value = string(object, name);
+			if (value != null) return value;
+		}
+		return "";
+	}
+
+	private record ServerDiff(String before, String after, String patch) { }
 
 	private static String readOrEmpty(String absolutePath) {
 		try {

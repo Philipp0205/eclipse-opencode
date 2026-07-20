@@ -26,6 +26,8 @@ final class OpenEditors {
 	private OpenEditors() {
 	}
 
+	record PromptTarget(java.util.function.Consumer<String> submit) { void submit(String text) { submit.accept(text); } }
+
 	record Attached(String path, boolean active, String selection, String unsavedContent, List<String> problems) {
 	}
 

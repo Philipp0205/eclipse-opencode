@@ -9,7 +9,15 @@ public record OpenCodeEvent(String type, com.google.gson.JsonObject raw) {
 		if (props == null) return null;
 		if (props.has("sessionID")) return props.get("sessionID").getAsString();
 		var info = props.getAsJsonObject("info");
-		return info != null && info.has("id") ? info.get("id").getAsString() : null;
+		if (info != null && info.has("sessionID")) return info.get("sessionID").getAsString();
+		var part = props.getAsJsonObject("part");
+		if (part != null && part.has("sessionID")) return part.get("sessionID").getAsString();
+		// Only session events carry a session object whose id is the session id.
+		return isSessionEvent() && info != null && info.has("id") ? info.get("id").getAsString() : null;
+	}
+
+	private boolean isSessionEvent() {
+		return type.startsWith("session.");
 	}
 
 	/** Current session completion event, with deprecated session.idle fallback. */

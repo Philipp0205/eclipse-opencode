@@ -64,6 +64,10 @@ final class ConversationBrowser extends Composite {
 		execute("reset(" + JSON.toJson(ConversationHtml.conversation(messages)) + ")");
 	}
 
+	void setChatFontSize(int points) {
+		execute("document.documentElement.style.setProperty('--chat-font-size', '" + Math.max(10, Math.min(24, points)) + "px')");
+	}
+
 	void putMessage(String id, String role, String markdown) {
 		put(id, ConversationHtml.liveMessage(id, role, markdown));
 	}

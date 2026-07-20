@@ -66,14 +66,37 @@ final class ConversationHtml {
 		return switch (string(part, "type")) {
 			case "text" -> markdown(string(part, "text"));
 			case "reasoning" -> reasoning(part, expandReasoning);
-			case "tool" -> tool(part);
-			case "subtask" -> "<div class=\"tool\"><div class=\"tool-head\">Subagent · "
-					+ escape(string(part, "agent")) + "</div><div class=\"tool-detail\">"
-					+ escape(first(part, "description", "prompt")) + "</div></div>";
+			case "tool" -> "task".equals(string(part, "tool")) ? taskCard(part) : tool(part);
+			case "subtask" -> taskCard(part);
 			case "agent" -> "<div class=\"tool\"><div class=\"tool-head\">Agent · "
 					+ escape(string(part, "name")) + "</div></div>";
 			default -> "";
 		};
+	}
+
+	/** Compact, CLI-like disclosure for delegated work. The transcript remains available without
+	 * making the main conversation noisy. */
+	private static String taskCard(JsonObject part) {
+		JsonObject state = part.getAsJsonObject("state");
+		JsonObject input = state == null ? null : state.getAsJsonObject("input");
+		String name = first(input, "description", "prompt", "name");
+		if (name == null) name = first(part, "description", "prompt", "name");
+		String agent = first(input, "subagent_type", "agent", "name");
+		if (agent == null) agent = first(part, "agent");
+		String transcript = first(part, "transcript", "text", "result");
+		String status = first(state, "status");
+		if (status == null) status = first(part, "status");
+		String count = first(part, "toolCount");
+		String currentTool = first(part, "currentTool");
+		String meta = (count != null ? count : "0") + " tool call" + ("1".equals(count) ? "" : "s");
+		return "<details class=\"task-card\"><summary>" + escape(agent != null ? agent : "Task") + " — "
+				+ escape(name != null ? name : "delegated work")
+				+ "<span class=\"task-meta\">" + meta + "</span></summary><div class=\"task-body\">"
+				+ "<div class=\"task-status\">" + escape(status != null ? status : "running")
+				+ (currentTool != null ? " · " + escape(currentTool) : "")
+				+ (agent != null ? " · " + escape(agent) : "") + "</div>"
+				+ (transcript != null ? "<div class=\"subagent-transcript\">" + escape(transcript) + "</div>" : "")
+				+ "</div></details>";
 	}
 
 	private static String reasoning(JsonObject part, boolean expanded) {

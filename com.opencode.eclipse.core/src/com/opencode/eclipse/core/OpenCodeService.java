@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -76,6 +78,7 @@ public final class OpenCodeService {
 		}
 		this.workspaceDir = workspaceRoot;
 		var pb = new ProcessBuilder("opencode", "serve", "--port", "0", "--hostname", "127.0.0.1");
+		pb.environment().put("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "true");
 		if (workspaceRoot != null) {
 			pb.directory(new java.io.File(workspaceRoot));
 		}
@@ -198,7 +201,7 @@ public final class OpenCodeService {
 
 	public JsonObject renameSession(String sessionId, String title) throws IOException {
 		JsonObject body = new JsonObject(); body.addProperty("title", title);
-		return patch("/session/" + sessionId, body.toString()).getAsJsonObject();
+		return patch(activeSessionPath("/session/" + sessionId), body.toString()).getAsJsonObject();
 	}
 
 	public boolean deleteSession(String sessionId) throws IOException {
@@ -206,7 +209,26 @@ public final class OpenCodeService {
 	}
 
 	public JsonArray getSessionChildren(String sessionId) throws IOException {
-		return get("/session/" + sessionId + "/children").getAsJsonArray();
+		return get(activeSessionPath("/session/" + sessionId + "/children")).getAsJsonArray();
+	}
+
+	/** Return all currently known descendants, including nested task sessions. */
+	public JsonArray getSessionDescendants(String sessionId) throws IOException {
+		JsonArray descendants = new JsonArray();
+		collectSessionDescendants(sessionId, descendants, new HashSet<>());
+		return descendants;
+	}
+
+	private void collectSessionDescendants(String sessionId, JsonArray descendants, Set<String> seen)
+			throws IOException {
+		if (!seen.add(sessionId)) return;
+		for (JsonElement child : getSessionChildren(sessionId)) {
+			JsonObject childObject = child.getAsJsonObject();
+			String childId = optString(childObject, "id", null);
+			if (childId == null || seen.contains(childId)) continue;
+			descendants.add(childObject);
+			collectSessionDescendants(childId, descendants, seen);
+		}
 	}
 
 	public JsonArray getSessionTodos(String sessionId) throws IOException {
@@ -215,7 +237,7 @@ public final class OpenCodeService {
 
 	public JsonObject forkSession(String sessionId, String messageId) throws IOException {
 		JsonObject body = new JsonObject(); if (messageId != null) body.addProperty("messageID", messageId);
-		return post("/session/" + sessionId + "/fork", body.toString()).getAsJsonObject();
+		return post(activeSessionPath("/session/" + sessionId + "/fork"), body.toString()).getAsJsonObject();
 	}
 
 	public JsonObject unrevertSession(String sessionId) throws IOException {
@@ -231,7 +253,8 @@ public final class OpenCodeService {
 	}
 
 	public void moveSession(String sessionId, String directory) throws IOException {
-		post("/experimental/control-plane/move-session", moveSessionBody(sessionId, directory).toString());
+		post(activeSessionPath("/experimental/control-plane/move-session"),
+				moveSessionBody(sessionId, directory).toString());
 		currentSessionDirectory = directory;
 	}
 
@@ -335,7 +358,7 @@ public final class OpenCodeService {
 
 	public List<CommandInfo> listCommands() throws IOException {
 		String dir = workspaceDir != null ? workspaceDir : System.getProperty("user.dir");
-		JsonArray data = get("/command?directory=" + enc(dir)).getAsJsonArray();
+		JsonArray data = get(activeSessionPath("/command")).getAsJsonArray();
 		List<CommandInfo> commands = new ArrayList<>();
 		for (JsonElement element : data) {
 			JsonObject command = element.getAsJsonObject();
@@ -516,6 +539,11 @@ public final class OpenCodeService {
 
 		boolean idle = false;
 		try {
+			Set<String> childSessionIds = new HashSet<>();
+			for (JsonElement child : getSessionDescendants(sid)) {
+				String childId = optString(child.getAsJsonObject(), "id", null);
+				if (childId != null) childSessionIds.add(childId);
+			}
 			String dir = activeDirectory();
 			HttpRequest sub = HttpRequest.newBuilder(uri("/event?directory=" + enc(dir)))
 					.header("Accept", "text/event-stream").GET().build();
@@ -547,9 +575,14 @@ public final class OpenCodeService {
 				JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
 				OpenCodeEvent ev = new OpenCodeEvent(optString(obj, "type", ""), obj);
 				String evSid = ev.sessionID();
-				if (evSid == null || evSid.equals(sid)) {
+				if (evSid != null && !evSid.equals(sid)
+						&& isChildSessionEvent(ev, sid, childSessionIds)) {
+					childSessionIds.add(evSid);
+				}
+				if (isForwardableEvent(ev, sid, childSessionIds)) {
 					onEvent.accept(ev);
-					if (ev.isIdle()) { idle = true; break; }
+					// A task becoming idle does not complete its parent prompt.
+					if (sid.equals(evSid) && ev.isIdle()) { idle = true; break; }
 				}
 			}
 			} catch (IOException streamError) {
@@ -567,6 +600,24 @@ public final class OpenCodeService {
 			cancelRun(run);
 			prompts.remove(sid, run);
 		}
+	}
+
+	private static boolean isChildSessionEvent(OpenCodeEvent event, String rootSessionId,
+			Set<String> knownChildIds) {
+		String sessionId = event.sessionID();
+		if (knownChildIds.contains(sessionId)) return true;
+		JsonObject properties = event.raw().getAsJsonObject("properties");
+		String parentId = optString(properties, "parentID", null);
+		JsonObject info = properties == null ? null : properties.getAsJsonObject("info");
+		if (parentId == null) parentId = optString(info, "parentID", null);
+		return parentId != null && (rootSessionId.equals(parentId) || knownChildIds.contains(parentId));
+	}
+
+	static boolean isForwardableEvent(OpenCodeEvent event, String rootSessionId,
+			Set<String> childSessionIds) {
+		String eventSessionId = event.sessionID();
+		if (eventSessionId == null) return "file.edited".equals(event.type());
+		return rootSessionId.equals(eventSessionId) || childSessionIds.contains(eventSessionId);
 	}
 
 	// ---- permissions / revert / abort ------------------------------------

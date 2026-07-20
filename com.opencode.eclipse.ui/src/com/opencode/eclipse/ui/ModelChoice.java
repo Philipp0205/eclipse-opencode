@@ -8,7 +8,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 record ModelChoice(String model, String variant, long contextLimit) {
-	String label() { return variant == null ? model : model + " [" + variant + "]"; }
+	/** A provider is an implementation detail; the picker should read like a model picker. */
+	String label() {
+		String display = model;
+		int slash = display.indexOf('/');
+		if (slash >= 0 && slash + 1 < display.length()) display = display.substring(slash + 1);
+		return variant == null ? display : display + " [" + variant + "]";
+	}
 
 	static List<ModelChoice> from(JsonObject providers) {
 		List<ModelChoice> result = new ArrayList<>();

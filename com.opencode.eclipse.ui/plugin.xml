@@ -10,7 +10,14 @@
             category="com.opencode.eclipse.ui.category"
             class="com.opencode.eclipse.ui.ChatView"
             allowMultiple="true"
-            restorable="true"/>
+             restorable="true"/>
+       <view
+             id="com.opencode.eclipse.ui.changedFilesView"
+             name="OpenCode Changes"
+             icon="icons/opencode-16.png"
+             category="com.opencode.eclipse.ui.category"
+             class="com.opencode.eclipse.ui.ChangedFilesView"
+             restorable="true"/>
       <view
             id="com.opencode.eclipse.ui.sessionMonitorView"
             name="OpenCode Sessions"
@@ -18,6 +25,13 @@
             category="com.opencode.eclipse.ui.category"
             class="com.opencode.eclipse.ui.SessionMonitorView"
             restorable="true"/>
+      <view id="com.opencode.eclipse.ui.sessionSidebarView" name="OpenCode Context"
+            icon="icons/opencode-16.png" category="com.opencode.eclipse.ui.category"
+            class="com.opencode.eclipse.ui.SessionSidebarView" restorable="true"/>
+   </extension>
+   <extension point="org.eclipse.ui.preferencePages">
+      <page id="com.opencode.eclipse.ui.chatPreferences" name="OpenCode Chat"
+            category="org.eclipse.ui.preferencePages.General" class="com.opencode.eclipse.ui.ChatPreferencePage"/>
    </extension>
    <extension point="org.eclipse.ui.commands">
       <command
@@ -26,9 +40,11 @@
       <command
             id="com.opencode.eclipse.ui.commands.openSettings"
             name="Open OpenCode Settings"/>
-      <command
-            id="com.opencode.eclipse.ui.commands.openChat"
-            name="Open OpenCode Chat"/>
+       <command
+             id="com.opencode.eclipse.ui.commands.openChat"
+             name="Open OpenCode Chat"/>
+       <command id="com.opencode.eclipse.ui.commands.diff" name="Show session changes"/>
+       <command id="com.opencode.eclipse.ui.commands.editor" name="Open prompt editor"/>
    </extension>
    <extension point="org.eclipse.ui.handlers">
       <handler
@@ -38,8 +54,10 @@
             class="com.opencode.eclipse.ui.OpenSettingsHandler"
             commandId="com.opencode.eclipse.ui.commands.openSettings"/>
       <handler
-            class="com.opencode.eclipse.ui.OpenChatHandler"
-            commandId="com.opencode.eclipse.ui.commands.openChat"/>
+             class="com.opencode.eclipse.ui.OpenChatHandler"
+             commandId="com.opencode.eclipse.ui.commands.openChat"/>
+       <handler class="com.opencode.eclipse.ui.DiffHandler" commandId="com.opencode.eclipse.ui.commands.diff"/>
+       <handler class="com.opencode.eclipse.ui.PromptEditorHandler" commandId="com.opencode.eclipse.ui.commands.editor"/>
    </extension>
    <extension point="org.eclipse.ui.menus">
       <menuContribution locationURI="toolbar:org.eclipse.ui.trim.status">
@@ -63,5 +81,10 @@
                style="push"
                tooltip="Open opencode.json"/>
       </menuContribution>
+   </extension>
+   <extension point="org.eclipse.ui.editors">
+      <editor id="com.opencode.eclipse.ui.untitledPromptEditor"
+            name="Untitled prompt" class="com.opencode.eclipse.ui.UntitledPromptEditor"
+            />
    </extension>
 </plugin>

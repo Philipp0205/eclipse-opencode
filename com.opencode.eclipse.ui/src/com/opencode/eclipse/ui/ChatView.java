@@ -54,6 +54,12 @@ public final class ChatView extends ViewPart {
 			new CommandInfo("restart", "Restart OpenCode to apply configuration changes", "client", null, null, false, List.of()),
 			new CommandInfo("mcps", "Show OpenCode MCP server status", "client", null, null, false, List.of()),
 			new CommandInfo("help", "Show available Eclipse slash commands", "client", null, null, false, List.of()));
+		// These names intentionally win over server commands with the same name.
+	private static final List<CommandInfo> PHASE_ONE_COMMANDS = List.of(
+			new CommandInfo("rename", "Rename the current session", "client", null, null, false, List.of()),
+			new CommandInfo("fork", "Fork the current session", "client", null, null, false, List.of()),
+			new CommandInfo("diff", "Show the authoritative session diff", "client", null, null, false, List.of()),
+			new CommandInfo("editor", "Compose prompt text in an Eclipse editor", "client", null, null, false, List.of()));
 
 	private static final CommandInfo CONNECT_COMMAND =
 			new CommandInfo("connect", "Connect an AI provider", "client", null, null, false, List.of());
@@ -70,6 +76,7 @@ public final class ChatView extends ViewPart {
 	private ChangedFilesBar changedFiles;
 	private Composite queueBar;
 	private Text input;
+	private org.eclipse.swt.widgets.Button sendButton;
 	private Label status;
 	private Label activity;
 	private SpinnerAnimator spinner;
@@ -94,11 +101,21 @@ public final class ChatView extends ViewPart {
 	private Image stopImage;
 	private Image attachImage;
 	private int mcpServers;
+	private int lspServers;
+	private int todoCount;
+	private int pluginInfoCount;
 	private long contextUsed;
 	private long contextLimit;
 	private double sessionCost;
 	private String workingFolder;
 	private boolean providerConnected;
+	private boolean deleting;
+	private final Map<String, StringBuilder> childTranscripts = new HashMap<>();
+	private final Map<String, String> childTools = new HashMap<>();
+	private final org.eclipse.core.runtime.preferences.IEclipsePreferences.IPreferenceChangeListener fontListener = event -> {
+		if ("chatFontSize".equals(event.getKey()) && conversation != null && !conversation.isDisposed())
+			conversation.getDisplay().asyncExec(() -> conversation.setChatFontSize(ChatPreferences.fontSize()));
+	};
 	private boolean attachAllOpen;
 	private int interactionBlockers;
 	private int turnGeneration;
@@ -133,9 +150,15 @@ public final class ChatView extends ViewPart {
 		spinner = new SpinnerAnimator(activity);
 		status = new Label(statusRow, SWT.NONE);
 		status.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+		status.addListener(SWT.MouseDoubleClick, e -> {
+			String text = status.getToolTipText();
+			if (text != null && !text.equals(status.getText())) new InfoDialog(getSite().getShell(), text).open();
+		});
 		Button contextButton = new Button(statusRow, SWT.PUSH | SWT.FLAT); contextButton.setText("Info");
 		contextButton.setToolTipText("Show OpenCode session info"); contextButton.addListener(SWT.Selection, e -> showContext());
 		setStatus("Starting opencode…");
+		conversation.setChatFontSize(ChatPreferences.fontSize());
+		ChatPreferences.node().addPreferenceChangeListener(fontListener);
 
 		startServerAsync();
 		installEditorListener();
@@ -223,6 +246,15 @@ public final class ChatView extends ViewPart {
 		});
 	}
 
+	public void renameFromMonitor() { renameSession(); }
+	public void deleteFromMonitor() {
+		String id = service.getCurrentSessionId();
+		deleting = true;
+		new Thread(() -> { try { service.deleteSession(id); ui(() -> getSite().getPage().hideView(this)); } catch (Exception ex) {
+			deleting = false;
+			ui(() -> setStatus("Delete failed: " + ex.getMessage()));
+		} }, "opencode-delete-monitor").start();
+	}
 	private void renameSession() {
 		org.eclipse.jface.dialogs.InputDialog dialog = new org.eclipse.jface.dialogs.InputDialog(
 				getSite().getShell(), "Rename session", "Session title", sessionButton.getText(), null);
@@ -258,8 +290,13 @@ public final class ChatView extends ViewPart {
 					String url = str(session.getAsJsonObject("share"), "url");
 					ui(() -> copyToClipboard(url));
 				}
-				if ("fork".equals(action)) service.switchSession(str(session, "id"));
-				refreshSessionsAsync();
+				if ("fork".equals(action)) {
+					service.switchSession(str(session, "id"));
+					JsonArray messages = service.getMessages(service.getCurrentSessionId());
+					JsonArray todos = service.getSessionTodos(service.getCurrentSessionId());
+					JsonArray sessions = service.listSessions();
+					ui(() -> { fillSessions(sessions); renderHistory(messages); todoPanel.setTodos(todos); workingFolder = service.getCurrentSessionDirectory(); updateStatus(); });
+				} else refreshSessionsAsync();
 			} catch (Exception ex) { ui(() -> setStatus(action + " failed: " + ex.getMessage())); }
 		}, "opencode-session-action").start();
 	}
@@ -354,6 +391,7 @@ public final class ChatView extends ViewPart {
 		});
 
 		org.eclipse.swt.widgets.Button sendBtn = new org.eclipse.swt.widgets.Button(row, SWT.PUSH | SWT.FLAT);
+		sendButton = sendBtn;
 		sendImage = loadIcon(row.getDisplay(), "icons/chat/send.png");
 		sendBtn.setImage(sendImage);
 		sendBtn.setToolTipText("Send");
@@ -403,8 +441,7 @@ public final class ChatView extends ViewPart {
 					mcpServers = connectedMcpServers(mcp);
 					providerConnected = providerStatus.getAsJsonArray("connected") != null
 							&& !providerStatus.getAsJsonArray("connected").isEmpty();
-					List<CommandInfo> allCommands = new ArrayList<>(CLIENT_COMMANDS); allCommands.add(CONNECT_COMMAND);
-					allCommands.addAll(loadedCommands);
+					List<CommandInfo> allCommands = mergedCommands(loadedCommands);
 					commands = List.copyOf(allCommands);
 					fillAgents(agents);
 					fillSessions(sessions);
@@ -648,7 +685,7 @@ public final class ChatView extends ViewPart {
 		slashPopup.close();
 		SlashCommands.Invocation invocation = SlashCommands.parse(commands, text);
 		if (invocation != null && "client".equals(invocation.command().source())) {
-			handleClientCommand(invocation.command().name());
+			handleClientCommand(invocation.command().name(), invocation.arguments());
 			return;
 		}
 		if (!providerConnected) {
@@ -721,8 +758,12 @@ public final class ChatView extends ViewPart {
 		QueuedPrompt next = promptQueue.poll(); updateQueueBar(); dispatch(next);
 	}
 
-	private void handleClientCommand(String command) {
+	private void handleClientCommand(String command, String arguments) {
 		switch (command) {
+			case "rename" -> renameSessionWithTitle(arguments);
+			case "fork" -> sessionAction("fork");
+			case "diff" -> showSessionDiff();
+			case "editor" -> openPromptEditor(arguments);
 			case "model", "models" -> openModelPicker();
 			case "agents" -> { agentCombo.setFocus(); agentCombo.setListVisible(true); }
 			case "sessions" -> openSessionPicker();
@@ -741,6 +782,39 @@ public final class ChatView extends ViewPart {
 		}
 	}
 
+	private List<CommandInfo> mergedCommands(List<CommandInfo> server) {
+		java.util.LinkedHashMap<String, CommandInfo> merged = new java.util.LinkedHashMap<>();
+		for (CommandInfo c : CLIENT_COMMANDS) merged.put(c.name(), c);
+		for (CommandInfo c : PHASE_ONE_COMMANDS) merged.put(c.name(), c);
+		merged.put(CONNECT_COMMAND.name(), CONNECT_COMMAND);
+		for (CommandInfo c : server) merged.putIfAbsent(c.name(), c);
+		return List.copyOf(merged.values());
+	}
+
+	private void renameSessionWithTitle(String title) {
+		if (title == null || title.isBlank()) { renameSession(); return; }
+		String id = service.getCurrentSessionId(); new Thread(() -> { try { service.renameSession(id, title.trim()); refreshSessionsAsync(); }
+		catch (Exception ex) { ui(() -> setStatus("Rename failed: " + ex.getMessage())); } }, "opencode-rename-command").start();
+	}
+
+	private void showSessionDiff() {
+		new Thread(() -> { try { JsonArray diff = service.getDiff(null); ui(() -> { diffs.setAuthoritativeChanges(diff, service.getWorkspaceRoot()); Diffs.openListing(diffs); }); }
+		catch (Exception ex) { ui(() -> setStatus("Diff failed: " + ex.getMessage())); } }, "opencode-session-diff").start();
+	}
+
+	/** Public command bridge; the command handler delegates to the originating view. */
+	public void showDiffs() { showSessionDiff(); }
+
+	private void openPromptEditor(String initial) {
+		try { getSite().getPage().openEditor(new UntitledPromptEditorInput(promptTarget(), initial), UntitledPromptEditor.ID, true); }
+		catch (Exception ex) { setStatus("Prompt editor failed: " + ex.getMessage()); }
+	}
+
+	/** Explicit, view-owned bridge for the untitled prompt editor. */
+	OpenEditors.PromptTarget promptTarget() {
+		return new OpenEditors.PromptTarget(text -> { if (!input.isDisposed()) { input.setText(text); input.setFocus(); sendButton.notifyListeners(SWT.Selection, new org.eclipse.swt.widgets.Event()); } });
+	}
+
 	private void restartOpenCode() {
 		if (busy || !promptQueue.isEmpty()) { setStatus("Finish current work before restarting OpenCode"); return; }
 		String session = service.getCurrentSessionId(); setStatus("Restarting OpenCode…"); spinner.start();
@@ -755,8 +829,7 @@ public final class ChatView extends ViewPart {
 				ui(() -> {
 					spinner.stop(); fillSessions(sessions); renderHistory(messages); fillAgents(agents);
 					fillModels(providers, config.has("model") ? config.get("model").getAsString() : null);
-					List<CommandInfo> allCommands = new ArrayList<>(CLIENT_COMMANDS); allCommands.add(CONNECT_COMMAND);
-					allCommands.addAll(loadedCommands); commands = List.copyOf(allCommands);
+					commands = mergedCommands(loadedCommands);
 					service.watchSessionEvents(event -> ui(() -> onSessionEvent(event)));
 				});
 			} catch (Exception ex) { ui(() -> { spinner.stop(); setStatus("Restart failed: " + ex.getMessage()); }); }
@@ -837,7 +910,7 @@ public final class ChatView extends ViewPart {
 		String deleted = "session.deleted".equals(event.type()) ? event.sessionID() : null;
 		new Thread(() -> {
 			try {
-				if (deleted != null && deleted.equals(service.getCurrentSessionId())) {
+				if (deleted != null && deleted.equals(service.getCurrentSessionId()) && !deleting) {
 					JsonArray sessions = service.listSessions();
 					if (sessions.isEmpty()) service.createSession();
 					else service.switchSession(str(sessions.get(0).getAsJsonObject(), "id"));
@@ -853,6 +926,10 @@ public final class ChatView extends ViewPart {
 	/** Called on the SWT thread. */
 	private void onEvent(com.opencode.eclipse.core.OpenCodeEvent ev) {
 		JsonObject raw = ev.raw();
+		String eventSession = ev.sessionID();
+		if (eventSession != null && runningSessionId != null && !runningSessionId.equals(eventSession)) {
+			renderChildTask(ev, eventSession);
+		}
 		switch (ev.type()) {
 		case "message.updated" -> {
 			// Remember which messageIDs are assistant messages so parts render correctly.
@@ -899,6 +976,8 @@ public final class ChatView extends ViewPart {
 			String msg = Events.errorMessage(raw);
 			{
 				removeConversationActivity();
+				setStatus("OpenCode error · double-click for details");
+				status.setToolTipText(msg != null ? msg : "OpenCode reported an unknown error");
 				conversation.putMessage("error-" + System.nanoTime(), "assistant",
 						"**Error:** " + (msg != null ? msg : "unknown error"));
 			}
@@ -919,6 +998,7 @@ public final class ChatView extends ViewPart {
 			}
 		}
 		case "session.idle", "session.status" -> {
+			if (runningSessionId == null || !runningSessionId.equals(ev.sessionID())) break;
 			if (!ev.isIdle()) break;
 			if (activeAssistantMessage != null) {
 				renderLiveMessage(activeAssistantMessage, false);
@@ -933,7 +1013,29 @@ public final class ChatView extends ViewPart {
 		}
 	}
 
+	private void renderChildTask(com.opencode.eclipse.core.OpenCodeEvent ev, String sessionId) {
+		StringBuilder transcript = childTranscripts.computeIfAbsent(sessionId, ignored -> new StringBuilder());
+		JsonObject part = Events.part(ev.raw());
+		if (part != null) {
+			String tool = str(part, "tool");
+			if (tool != null) childTools.put(sessionId, tool);
+			String text = str(part, "text");
+			if (text != null && !text.isBlank()) transcript.append(text).append('\n');
+		}
+		JsonObject task = new JsonObject(); task.addProperty("type", "tool"); task.addProperty("tool", "task");
+		task.addProperty("agent", "child session"); task.addProperty("description", sessionId);
+		task.addProperty("status", ev.isIdle() ? "completed" : "running");
+		task.addProperty("toolCount", Integer.toString(childTools.containsKey(sessionId) ? 1 : 0));
+		task.addProperty("currentTool", childTools.get(sessionId));
+		task.addProperty("transcript", transcript.toString());
+		JsonArray parts = new JsonArray(); parts.add(task);
+		conversation.putMessageHtml("child-task-" + ConversationHtml.id(sessionId),
+				ConversationHtml.message("child-task-" + sessionId, "assistant", parts));
+		publishMonitorState();
+	}
+
 	private void reviewSessionChanges(String sessionId) {
+		if (runningSessionId == null || !runningSessionId.equals(sessionId)) return;
 		new Thread(() -> {
 			try {
 				JsonArray changes = service.getDiff(sessionId);
@@ -1351,8 +1453,20 @@ public final class ChatView extends ViewPart {
 	private void setStatus(String s) {
 		if (status != null && !status.isDisposed()) {
 			status.setText(s);
+			if (s == null || (!s.startsWith("OpenCode error") && !s.startsWith("Prompt failed") && !s.startsWith("Failed")))
+				status.setToolTipText(null);
+			if (s != null && s.length() > 120) status.setToolTipText(s);
 		}
 	}
+
+	/** Small read-only snapshot used by the optional workbench sidebar. */
+	public String sidebarSnapshot() {
+		return "Session: " + sessionButton.getText() + "\nWorking folder: " + workingFolder
+				+ "\nContext: " + contextUsed + " / " + contextLimit + " tokens\nMCP: " + mcpServers
+				+ " connected\nStatus: " + (busy ? "running" : "ready");
+	}
+	public String sidebarDetails() { return sidebarSnapshot() + "\nLSP: " + lspServers
+				+ " configured\nTodos: " + todoCount + " current\nPlugins / events: " + pluginInfoCount + " commands"; }
 
 	private void ui(Runnable r) {
 		Display d = Display.getDefault();
@@ -1367,6 +1481,7 @@ public final class ChatView extends ViewPart {
 
 	@Override
 	public void setFocus() {
+		ChatViewRegistry.active(this);
 		if (input != null && !input.isDisposed()) {
 			input.setFocus();
 		}
@@ -1374,6 +1489,7 @@ public final class ChatView extends ViewPart {
 
 	@Override
 	public void dispose() {
+		ChatPreferences.node().removePreferenceChangeListener(fontListener);
 		ChatViewRegistry.remove(this);
 		if (editorListener != null) getSite().getPage().removePartListener(editorListener);
 		if (slashPopup != null) slashPopup.close();

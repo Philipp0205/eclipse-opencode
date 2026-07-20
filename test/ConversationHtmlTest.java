@@ -45,7 +45,7 @@ public final class ConversationHtmlTest {
 		assert html.contains("skill \"context7\" · completed") : html;
 		String code = MarkdownHtml.render("```java\nclass A {}\n```");
 		assert code.contains("class=\"language-java\"") && code.contains("hl-keyword") : code;
-		assert html.contains("Subagent · explore") && html.contains("Inspect source tree") : html;
+		assert html.contains("explore") && html.contains("Inspect source tree") && html.contains("tool calls") : html;
 		assert !html.contains("<script>") && html.contains("&lt;script&gt;") : html;
 		System.out.println("CONVERSATION HTML OK");
 	}
