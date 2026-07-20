@@ -26,6 +26,7 @@ The whole-view probe must run from an Eclipse workspace with the PDE projects im
 
 ## Releases
 
+- Push this repository with the `Philipp0205` GitHub CLI account. Before release pushes, run `gh auth switch --hostname github.com --user Philipp0205`; the enterprise account does not have access to this repository.
 - Always bump the semantic plugin version before publishing or updating the p2 update site; do not rely only on the generated qualifier timestamp because Eclipse update checks must see an unambiguous newer version.
 - Keep the version synchronized in the root/module Maven POMs, both bundle `META-INF/MANIFEST.MF` files, and `com.opencode.eclipse.feature/feature.xml`, then run a clean repository build.
 - Publish with `rsync -a --delete` (or an equivalent clean replacement) so stale feature/plugin JARs are removed. Verify the published `content.jar`, not only the build output.
