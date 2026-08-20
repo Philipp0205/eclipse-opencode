@@ -1,22 +1,13 @@
 package com.opencode.eclipse.ui;
 
-import java.text.DateFormat;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.opencode.eclipse.core.OpenCodeService;
-import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.jface.action.Action;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.GridData;
@@ -120,7 +111,7 @@ public final class SessionsExplorerView extends ViewPart {
                 OpenCodeService service = explorerService;
                 if (service == null) {
                     OpenCodeService candidate = new OpenCodeService();
-                    candidate.initialize(effectiveWorkspaceRoot());
+                    candidate.initialize(SessionHistory.effectiveWorkspaceRoot());
                     synchronized (this) {
                         service = explorerService;
                         if (service == null) {
@@ -130,24 +121,10 @@ public final class SessionsExplorerView extends ViewPart {
                         }
                     }
                 }
-                List<String> roots = projectRoots();
-                Map<String, JsonObject> sessions = new LinkedHashMap<>();
-                List<String> errors = new ArrayList<>();
-                OpenCodeService queryService = service;
-                int parallelism = Math.max(1, Math.min(4, roots.size()));
-                ExecutorService pool = Executors.newFixedThreadPool(parallelism);
-                CompletionService<RootResult> completed = new ExecutorCompletionService<>(pool);
-                try {
-                    for (String root : roots) completed.submit(() -> listRoot(queryService, root));
-                    for (int i = 0; i < roots.size(); i++) {
-                        RootResult result = completed.take().get();
-                        result.sessions().forEach((key, session) -> sessions.putIfAbsent(key, session));
-                        if (result.error() != null) errors.add(result.error());
-                    }
-                } finally {
-                    pool.shutdownNow();
-                }
-                ui(() -> { if (generation == refreshGeneration) fill(new ArrayList<>(sessions.values()), errors); });
+                SessionHistory.FetchResult result = SessionHistory.fetchAll(service);
+                List<JsonObject> sessions = new ArrayList<>(result.sessions().values());
+                List<String> errors = result.errors();
+                ui(() -> { if (generation == refreshGeneration) fill(sessions, errors); });
             } catch (Exception ex) {
                 if (userInitiated) ui(() -> { if (generation == refreshGeneration) error(ex); });
             }
@@ -166,22 +143,6 @@ public final class SessionsExplorerView extends ViewPart {
             if (tree.isEnabled()) refreshAsync(false); // skip while a user-initiated load is in flight
             schedulePoll();
         });
-    }
-
-    private static RootResult listRoot(OpenCodeService service, String root) {
-        try {
-            Map<String, JsonObject> sessions = new LinkedHashMap<>();
-            for (var element : service.listSessions(root)) {
-                if (!element.isJsonObject()) continue;
-                JsonObject session = element.getAsJsonObject();
-                String id = value(session, "id");
-                String directory = canonical(value(session, "directory").isBlank() ? root : value(session, "directory"));
-                if (!id.isBlank()) sessions.putIfAbsent(id + "\n" + directory, sessionWithDirectory(session, directory));
-            }
-            return new RootResult(sessions, null);
-        } catch (Exception ex) {
-            return new RootResult(Map.of(), root + ": " + message(ex));
-        }
     }
 
     private void fill(List<JsonObject> sessions, List<String> errors) {
@@ -290,23 +251,11 @@ public final class SessionsExplorerView extends ViewPart {
     }
     private void ui(Runnable run) { if (!disposed && tree != null && !tree.isDisposed()) tree.getDisplay().asyncExec(() -> { if (!disposed && !tree.isDisposed()) run.run(); }); }
 
-    private List<String> projectRoots() {
-        LinkedHashMap<String, String> roots = new LinkedHashMap<>();
-        addRoot(roots, effectiveWorkspaceRoot());
-        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects())
-            if (project.isAccessible() && project.getLocation() != null) addRoot(roots, project.getLocation().toOSString());
-        return List.copyOf(roots.values());
-    }
-    private static void addRoot(Map<String, String> roots, String root) { try { Path p = Path.of(root).toRealPath(); roots.putIfAbsent(p.toString(), p.toString()); } catch (Exception ignored) { } }
-    private static String effectiveWorkspaceRoot() { var root = ResourcesPlugin.getWorkspace().getRoot(); String eclipse = root.getLocation() != null ? root.getLocation().toOSString() : System.getProperty("user.dir"); return WorkspaceRoot.resolve(System.getenv("ENV_SCM_WORKSPACE_ROOT"), eclipse); }
-    private static String canonical(String path) { try { return Path.of(path).toRealPath().toString(); } catch (Exception e) { return Path.of(path).toAbsolutePath().normalize().toString(); } }
     private static String projectName(String directory) { try { Path p = Path.of(directory); return p.getFileName() == null ? directory : p.getFileName().toString(); } catch (Exception e) { return directory; } }
-    private static JsonObject sessionWithDirectory(JsonObject source, String directory) { JsonObject copy = source.deepCopy(); copy.addProperty("directory", directory); return copy; }
-    private static String value(JsonObject o, String key) { return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : ""; }
-    private static String time(JsonObject o) { long n = o.has("time") && o.get("time").isJsonObject() && o.getAsJsonObject("time").has("updated") ? o.getAsJsonObject("time").get("updated").getAsLong() : o.has("updated") ? o.get("updated").getAsLong() : 0; return n == 0 ? "unknown time" : DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(n)); }
+    private static String value(JsonObject o, String key) { return SessionHistory.value(o, key); }
+    private static String time(JsonObject o) { return SessionHistory.time(o); }
     private static String message(Exception e) { return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(); }
     private record SessionTarget(String directory, String id, String title, boolean child) { }
-    private record RootResult(Map<String, JsonObject> sessions, String error) { }
     @Override public void setFocus() { if (tree != null) tree.setFocus(); }
     @Override public void dispose() {
         disposed = true;
