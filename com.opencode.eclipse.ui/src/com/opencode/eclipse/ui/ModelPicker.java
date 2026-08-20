@@ -41,7 +41,7 @@ final class ModelPicker {
 		search.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
 		org.eclipse.swt.widgets.List results = new org.eclipse.swt.widgets.List(
-				popup, SWT.SINGLE | SWT.V_SCROLL);
+				popup, SWT.SINGLE | SWT.V_SCROLL | SWT.LEFT);
 		GridData listData = new GridData(SWT.FILL, SWT.FILL, true, true);
 		listData.heightHint = 260;
 		listData.widthHint = 420;
@@ -65,6 +65,21 @@ final class ModelPicker {
 
 		search.addModifyListener(e -> refresh.run());
 		search.addListener(SWT.DefaultSelection, e -> commit.run());
+		search.addListener(SWT.KeyDown, e -> {
+			int count = results.getItemCount();
+			if (count == 0) return;
+			int current = results.getSelectionIndex();
+			if (e.keyCode == SWT.ARROW_DOWN) {
+				results.select(Math.min(current + 1, count - 1));
+				e.doit = false;
+			} else if (e.keyCode == SWT.ARROW_UP) {
+				results.select(Math.max(current - 1, 0));
+				e.doit = false;
+			} else if (e.character == SWT.CR || e.character == SWT.LF) {
+				commit.run();
+				e.doit = false;
+			}
+		});
 		// Commit before GTK deactivates/disposes the popup.
 		results.addListener(SWT.MouseDown, e -> commit.run());
 		results.addListener(SWT.DefaultSelection, e -> commit.run());
