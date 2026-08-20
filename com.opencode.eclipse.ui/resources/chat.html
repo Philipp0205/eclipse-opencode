@@ -23,12 +23,32 @@
     </p>
   </section>
   <main id="conversation" role="log" aria-live="polite" aria-label="OpenCode conversation"></main>
+  <button id="jump-to-latest" class="jump-to-latest" type="button" hidden aria-label="Scroll to latest message">
+    <span aria-hidden="true">↓</span> Latest
+  </button>
   <script>
     let pinned = true;
     const root = document.getElementById('conversation');
     const welcome = document.getElementById('welcome');
+    const jumpToLatest = document.getElementById('jump-to-latest');
     function updateWelcome() { welcome.hidden = root.children.length > 0; }
-    addEventListener('scroll', () => pinned = innerHeight + scrollY >= document.body.scrollHeight - 64);
+    function documentHeight() {
+      return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    }
+    function atBottom() { return innerHeight + scrollY >= documentHeight() - 1; }
+    function updateJumpToLatest() {
+      jumpToLatest.hidden = pinned || atBottom();
+    }
+    addEventListener('scroll', () => {
+      pinned = innerHeight + scrollY >= documentHeight() - 64;
+      updateJumpToLatest();
+    });
+    jumpToLatest.addEventListener('click', () => {
+      pinned = true;
+      scrollTo(0, documentHeight());
+      updateJumpToLatest();
+      requestAnimationFrame(updateJumpToLatest);
+    });
     function put(id, html) {
       let node = document.getElementById(id);
       if (!node) {
@@ -38,18 +58,24 @@
       }
       node.outerHTML = html;
       updateWelcome();
-      if (pinned) scrollTo(0, document.body.scrollHeight);
+      if (pinned) scrollTo(0, documentHeight());
+      updateJumpToLatest();
+      requestAnimationFrame(updateJumpToLatest);
     }
     function reset(html) {
       root.innerHTML = html;
       updateWelcome();
-      scrollTo(0, document.body.scrollHeight);
+      scrollTo(0, documentHeight());
       pinned = true;
+      updateJumpToLatest();
+      requestAnimationFrame(updateJumpToLatest);
     }
     function removeBlock(id) {
       const node = document.getElementById(id);
       if (node) node.remove();
       updateWelcome();
+      updateJumpToLatest();
+      requestAnimationFrame(updateJumpToLatest);
     }
   </script>
 </body>

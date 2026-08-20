@@ -20,6 +20,10 @@ import org.eclipse.compare.structuremergeviewer.DiffNode;
 import org.eclipse.compare.structuremergeviewer.Differencer;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.jface.viewers.LabelProvider;
+import org.eclipse.jface.window.Window;
+import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.dialogs.ElementListSelectionDialog;
 
 /**
  * Opens Eclipse's built-in compare (diff) view for a file opencode edited,
@@ -79,12 +83,36 @@ final class Diffs {
 	}
 
 	/** Opens the workbench listing; this is deliberately not a dialog. */
-	static void openListing(Diffs model) {
+	static boolean openListing(Diffs model) {
 		try {
 			var window = org.eclipse.ui.PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+			if (window == null || window.getActivePage() == null) return false;
 			var view = window.getActivePage().showView(ChangedFilesView.ID, null, org.eclipse.ui.IWorkbenchPage.VIEW_ACTIVATE);
 			if (view instanceof ChangedFilesView changes) changes.bind(model);
-		} catch (Exception ignored) { }
+			return true;
+		} catch (Exception ignored) { return false; }
+	}
+
+	/** Opens a transient file selector and then the existing compare editor. */
+	static boolean openListingPopup(Diffs model) {
+		try {
+			var window = PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+			if (window == null || window.getShell() == null || window.getShell().isDisposed()) return false;
+			List<String> paths = model.currentFiles();
+			if (paths.isEmpty()) return false;
+			String[] labels = paths.stream()
+					.map(path -> Path.of(path).getFileName().toString() + "\t" + path)
+					.toArray(String[]::new);
+			ElementListSelectionDialog dialog = new ElementListSelectionDialog(window.getShell(), new LabelProvider());
+			dialog.setTitle("Current session changes");
+			dialog.setMessage("Select a file to open Eclipse Compare:");
+			dialog.setElements(labels);
+			if (dialog.open() == Window.OK) {
+				int index = java.util.Arrays.asList(labels).indexOf(dialog.getFirstResult());
+				if (index >= 0) model.openCompare(paths.get(index));
+			}
+			return true;
+		} catch (Exception ignored) { return false; }
 	}
 
 	/** Record the current on-disk content as the "before" if not already captured. */
@@ -95,7 +123,12 @@ final class Diffs {
 	boolean changed(String path) {
 		synchronized (authoritative) {
 			ServerDiff diff = authoritative.get(path);
-			if (diff != null) return !diff.before.equals(diff.after);
+			if (diff != null) {
+				// A patch-only diff (server omitted full before/after content, e.g. for
+				// newly created files) still represents a real change.
+				if (diff.before.isEmpty() && diff.after.isEmpty() && !diff.patch.isEmpty()) return true;
+				return !diff.before.equals(diff.after);
+			}
 		}
 		return !snapshots.getOrDefault(path, gitBefore(path)).equals(readOrEmpty(path));
 	}
@@ -113,18 +146,19 @@ final class Diffs {
 		ServerDiff server = authoritative(absolutePath);
 		String before = server == null ? snapshots.getOrDefault(absolutePath, "") : server.before;
 		String after = server == null ? readOrEmpty(absolutePath) : server.after;
-		if (before.equals(after)) {
+		boolean patchOnly = server != null && before.isEmpty() && after.isEmpty() && !server.patch.isEmpty();
+		if (!patchOnly && before.equals(after)) {
 			return; // nothing changed
 		}
 		if (reviewer != null) { reviewer.accept(absolutePath); return; }
 		String name = Path.of(absolutePath).getFileName().toString();
 		CompareConfiguration cfg = new CompareConfiguration();
-		cfg.setLeftLabel(name + " (before opencode)");
-		cfg.setRightLabel(name + " (after)");
+		cfg.setLeftLabel(patchOnly ? name + " (no snapshot)" : name + " (before opencode)");
+		cfg.setRightLabel(patchOnly ? name + " (unified patch)" : name + " (after)");
 		cfg.setLeftEditable(false);
 		cfg.setRightEditable(false);
 		CompareEditorInput input = new TextCompareInput(cfg, name,
-				new StringElement(name, before), new StringElement(name, after));
+				new StringElement(name, before), new StringElement(name, patchOnly ? server.patch : after));
 		CompareUI.openCompareEditor(input);
 		if (Boolean.getBoolean("opencode.wholeViewProbe")) {
 			System.out.println("[OpenCodeProbe] PASS compare opened " + name);

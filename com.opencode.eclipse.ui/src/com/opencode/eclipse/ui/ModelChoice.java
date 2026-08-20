@@ -8,11 +8,17 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 record ModelChoice(String model, String variant, long contextLimit) {
-	/** A provider is an implementation detail; the picker should read like a model picker. */
-	String label() {
+	/** Compact label used for the selected model in the chat toolbar. */
+	String compactLabel() {
 		String display = model;
 		int slash = display.indexOf('/');
 		if (slash >= 0 && slash + 1 < display.length()) display = display.substring(slash + 1);
+		return variant == null ? display : display + " [" + variant + "]";
+	}
+
+	/** Label used in the picker, including the provider for disambiguation. */
+	String popupLabel() {
+		String display = model.replaceFirst("/", " / ");
 		return variant == null ? display : display + " [" + variant + "]";
 	}
 

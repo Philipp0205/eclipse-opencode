@@ -11,7 +11,7 @@ public final class ModelChoiceTest {
 		var choices = ModelChoice.from(providers);
 		assert choices.size() == 2 : choices;
 		assert choices.get(0).model().equals("p/m") && choices.get(0).variant() == null;
-		assert choices.get(1).label().equals("m [low]") && choices.get(1).contextLimit() == 42;
+		assert choices.get(1).compactLabel().equals("m [low]") && choices.get(1).contextLimit() == 42;
 		System.out.println("MODEL CHOICE OK");
 	}
 }

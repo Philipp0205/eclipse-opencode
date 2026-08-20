@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 /** Small safe Markdown-to-HTML renderer for chat messages, including GFM tables. */
 final class MarkdownHtml {
 	private static final Pattern TABLE_DIVIDER = Pattern.compile("^\\s*\\|?(?:\\s*:?-{3,}:?\\s*\\|)+\\s*$");
+	private static final Pattern FENCE = Pattern.compile("^\\s*(`{3,})(.*)$");
 
 	private MarkdownHtml() {
 	}
@@ -16,19 +17,30 @@ final class MarkdownHtml {
 		String[] lines = markdown.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
 		StringBuilder out = new StringBuilder();
 		boolean code = false, list = false;
+		String fence = "";
 		String codeLanguage = "";
 		for (int i = 0; i < lines.length; i++) {
 			String line = lines[i];
-			if (line.startsWith("```")) {
-				if (list) { out.append("</ul>"); list = false; }
-				if (code) out.append("</code></pre>");
-				else {
-					String language = line.substring(3).trim().replaceAll("[^A-Za-z0-9_+-]", "");
-					codeLanguage = language;
-					out.append("<pre><code").append(language.isEmpty() ? "" : " class=\"language-" + language + "\"")
-							.append('>');
+			java.util.regex.Matcher fenceMatch = FENCE.matcher(line);
+			if (fenceMatch.matches()) {
+				boolean closingFence = code && fenceMatch.group(2).trim().isEmpty()
+						&& fenceMatch.group(1).length() >= fence.length();
+				if (!code || closingFence) {
+					if (list) { out.append("</ul>"); list = false; }
+					if (code) {
+						out.append("</code></pre>");
+						code = false;
+						fence = "";
+					} else {
+						String language = fenceMatch.group(2).trim().replaceAll("[^A-Za-z0-9_+-]", "");
+						codeLanguage = language;
+						fence = fenceMatch.group(1);
+						out.append("<pre><code").append(language.isEmpty() ? "" : " class=\"language-" + language + "\"")
+								.append('>');
+						code = true;
+					}
+					continue;
 				}
-				code = !code; continue;
 			}
 			if (code) { out.append(highlight(line, codeLanguage)).append('\n'); continue; }
 			if (i + 1 < lines.length && line.contains("|") && TABLE_DIVIDER.matcher(lines[i + 1]).matches()) {
