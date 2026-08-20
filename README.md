@@ -8,23 +8,26 @@ uses OpenCode's HTTP and SSE APIs directly through the JDK `HttpClient`.
 
 - Streaming agent chat with Build and Plan agents and provider/model selection.
 - Rich Browser-based conversation rendering: Markdown, tables, code blocks,
-  reasoning, tool calls, todos, dark/light themes, and long histories.
+  reasoning, tool calls, dark/light themes, and long histories.
 - The active editor is attached automatically; **All open tabs** optionally includes every editor, including selected
   text, unsaved content, and Eclipse problem markers.
 - Paperclip attachment picker for Eclipse workspace files and folders.
 - OpenCode slash commands, custom commands, MCP prompts, and skills with fuzzy
   completion. Eclipse-owned commands include `/models`, `/agents`, `/sessions`,
-  `/new`, `/compact`, `/connect`, `/mcps`, and `/help`.
+  `/new`, `/compact`, `/connect`, `/mcps`, `/permissions`, and `/help`.
 - Messages entered while OpenCode is busy are queued locally and dispatched in
   order. Queued messages can be removed before they run.
-- Permission and question dialogs, live todo updates, subagent rendering, and
-  session rename/delete/fork/share/unrevert actions.
+- Permission and question dialogs, subagent rendering, and session
+  rename/delete/fork/share/unrevert actions. Permission prompts offer
+  **Always**, **Once**, and **Never**; Always and Never are remembered per
+  action and directory and reused in later sessions until `/permissions`
+  forgets them.
 - Changed-file review with Eclipse Compare, Keep All, and per-file Undo.
 - New Session and Settings view-toolbar actions plus an OpenCode status-trim
   button that opens the chat.
-- Status line shows session cost, context percentage, and working folder; the
-  selectable Info dialog shows token use, context limit, session ID, full folder,
-  cost, and MCP count.
+- Agent, model, activity, session cost, context percentage, and working folder
+  share one compact row below the prompt; the selectable Info dialog shows token
+  use, context limit, session ID, full folder, cost, and MCP count.
 - Provider setup detection and `/connect` for OAuth or API-key authentication.
 
 ## Requirements
@@ -47,6 +50,7 @@ click the OpenCode icon in Eclipse's bottom-right status trim.
 - Type `/` to search server and Eclipse slash commands.
 - The paperclip searches workspace resources; all currently open editor files
   are attached according to the active/all-tabs setting unless removed from the chip row.
+  The chip row is one row tall and scrolls; drag the sash above it to make it taller.
 - The Settings toolbar button opens the global `opencode.json` in Eclipse's
   generic text editor. Its location follows `OPENCODE_CONFIG`, XDG on Linux,
   Application Support on macOS, and APPDATA on Windows.
@@ -104,7 +108,7 @@ cache, but Reload is preferable.
 DISPLAY=:1 test/run.sh
 ```
 
-This builds the plugin and tests Markdown/tool/todo rendering, model search, and
+This builds the plugin and tests Markdown/tool rendering, model search, and
 popup/queue/diff behavior and the actual SWT Browser DOM with a 300-message
 conversation. Run the slower live OpenCode tests too with
 `OPENCODE_LIVE_TESTS=1 DISPLAY=:1 test/run.sh`.

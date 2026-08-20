@@ -2,8 +2,9 @@
 
 Audited against OpenCode `1.17.18` (`GET /doc`) and the installed SDK types.
 Core prompt streaming, current idle events, abort, permissions, questions,
-session todos, commands, provider setup, session CRUD, file review, and MCP
-status/connect/disconnect are implemented.
+commands, provider setup, session CRUD, file review, and MCP
+status/connect/disconnect are implemented. Session todos are intentionally not
+consumed: the panel could not be cleared reliably and was removed.
 
 ## High Value
 
