@@ -18,6 +18,9 @@ public final class OpenCodeEventTest {
 		assert !OpenCodeService.isForwardableEvent(event("session.status", "{}"), "root", children);
 		assert OpenCodeService.isForwardableEvent(event("file.edited", "{}"), "root", children);
 		assert !OpenCodeService.isForwardableEvent(event("message.updated", "{}"), "root", children);
+		assert "finished".equals(event("session.status", "{\"status\":\"finished\"}").status());
+		assert event("session.status", "{\"status\":{\"state\":\"completed\"}}").isIdle();
+		assert !event("session.status", "{\"status\":\"mysterious\"}").isIdle();
 		System.out.println("OPENCODE EVENTS OK");
 	}
 

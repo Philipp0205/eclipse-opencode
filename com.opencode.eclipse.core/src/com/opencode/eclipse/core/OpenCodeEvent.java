@@ -24,8 +24,39 @@ public record OpenCodeEvent(String type, com.google.gson.JsonObject raw) {
 	public boolean isIdle() {
 		if ("session.idle".equals(type)) return true;
 		if (!"session.status".equals(type)) return false;
+		return isCompletionStatus(status());
+	}
+
+	/** Status type carried by session status events, when present. */
+	public String status() {
 		var props = raw.getAsJsonObject("properties");
-		var status = props != null ? props.getAsJsonObject("status") : null;
-		return status != null && status.has("type") && "idle".equals(status.get("type").getAsString());
+		String status = statusValue(props);
+		if (status == null) status = statusValue(raw);
+		return status != null ? status : ("session.idle".equals(type) ? "idle" : null);
+	}
+
+	private static String statusValue(com.google.gson.JsonObject object) {
+		if (object == null) return null;
+		var value = object.get("status");
+		if (value != null && !value.isJsonNull()) {
+			if (value.isJsonPrimitive()) return value.getAsString();
+			if (value.isJsonObject()) {
+				var status = value.getAsJsonObject();
+				for (String key : new String[] { "type", "state" }) {
+					if (status.has(key) && status.get(key).isJsonPrimitive()) return status.get(key).getAsString();
+				}
+			}
+		}
+		var info = object.getAsJsonObject("info");
+		if (info != null && info != object) return statusValue(info);
+		return null;
+	}
+
+	private static boolean isCompletionStatus(String status) {
+		if (status == null) return false;
+		return switch (status.toLowerCase(java.util.Locale.ROOT)) {
+		case "idle", "done", "success", "finished", "complete", "completed", "reconciled", "terminated" -> true;
+		default -> false;
+		};
 	}
 }

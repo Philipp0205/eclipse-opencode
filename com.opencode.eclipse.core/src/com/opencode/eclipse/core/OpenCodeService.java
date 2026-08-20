@@ -105,14 +105,14 @@ public final class OpenCodeService {
 		drain.setDaemon(true);
 		drain.start();
 		try {
-			baseUrl = listening.get(15, TimeUnit.SECONDS);
+			baseUrl = listening.get(25, TimeUnit.SECONDS);
 			JsonObject health = get("/global/health").getAsJsonObject();
 			if (!health.has("healthy") || !health.get("healthy").getAsBoolean()) {
 				throw new IOException("opencode server is not healthy");
 			}
 		} catch (TimeoutException e) {
 			dispose();
-			throw new IOException("opencode server did not report a listen URL within 15s", e);
+			throw new IOException("opencode server did not report a listen URL within 25s", e);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			dispose();
@@ -137,15 +137,20 @@ public final class OpenCodeService {
 		eventThread = null;
 		for (PromptRun run : prompts.values()) cancelRun(run);
 		prompts.clear();
-		if (process != null) {
-			process.destroy();
-			try {
-				if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly();
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				process.destroyForcibly();
-			}
-			process = null;
+		Process closing = process;
+		process = null;
+		if (closing != null) {
+			closing.destroy();
+			Thread waiter = new Thread(() -> {
+				try {
+					if (!closing.waitFor(3, TimeUnit.SECONDS)) closing.destroyForcibly();
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					closing.destroyForcibly();
+				}
+			}, "opencode-process-cleanup");
+			waiter.setDaemon(true);
+			waiter.start();
 		}
 		baseUrl = null;
 		currentSessionId.set(null);
@@ -156,15 +161,35 @@ public final class OpenCodeService {
 	// ---- sessions ---------------------------------------------------------
 
 	public String createSession() throws IOException {
+		return createSession(workspaceDir);
+	}
+
+	public String createSession(String directory) throws IOException {
+		String oldWorkspace = workspaceDir;
+		if (directory != null && !directory.isBlank()) workspaceDir = java.nio.file.Path.of(directory).toAbsolutePath().normalize().toString();
 		JsonObject s = post(sessionPath("/session"), "{}").getAsJsonObject();
 		currentSessionId.set(s.get("id").getAsString());
 		currentSessionTitle = optString(s, "title", "New Session");
 		currentSessionDirectory = optString(s, "directory", workspaceDir);
+		if (currentSessionDirectory == null) workspaceDir = oldWorkspace;
 		return currentSessionId.get();
 	}
 
 	public JsonArray listSessions() throws IOException {
 		return get(sessionPath("/session")).getAsJsonArray();
+	}
+
+	/**
+	 * List sessions belonging to an explicitly selected project directory.
+	 *
+	 * <p>This does not change the service's active workspace or session. The
+	 * directory is canonicalized before being sent because OpenCode scopes the
+	 * session endpoint by its {@code directory} query parameter. This overload
+	 * is intended for callers that need to inspect several Eclipse project
+	 * roots with one service instance.
+	 */
+	public JsonArray listSessions(String directory) throws IOException {
+		return get(sessionPath("/session", canonicalDirectory(directory))).getAsJsonArray();
 	}
 
 	public JsonObject getSessionStatus() throws IOException {
@@ -177,6 +202,17 @@ public final class OpenCodeService {
 
 	public JsonObject switchSession(String sessionId) throws IOException {
 		JsonObject s = get(sessionPath("/session/" + sessionId)).getAsJsonObject();
+		return selectSession(s);
+	}
+
+	/** Switch to a session while explicitly selecting the directory scope. */
+	public JsonObject switchSession(String directory, String sessionId) throws IOException {
+		String canonical = canonicalDirectory(directory);
+		JsonObject s = get(sessionPath("/session/" + sessionId, canonical)).getAsJsonObject();
+		return selectSession(s);
+	}
+
+	private JsonObject selectSession(JsonObject s) {
 		currentSessionId.set(s.get("id").getAsString());
 		currentSessionTitle = optString(s, "title", "New Session");
 		currentSessionDirectory = optString(s, "directory", workspaceDir);
@@ -198,6 +234,17 @@ public final class OpenCodeService {
 	public JsonArray getMessages(String sessionId) throws IOException {
 		return get(activeSessionPath("/session/" + sessionId + "/message")).getAsJsonArray();
 	}
+
+	/** Same as {@link #getMessages(String)} but explicitly scoped to {@code directory} instead of
+	 * this service's current session directory — for querying a session (e.g. a delegated
+	 * subagent) that may live in a different directory than whatever this service is currently
+	 * pointed at. */
+	public JsonArray getMessages(String sessionId, String directory) throws IOException {
+		String path = "/session/" + sessionId + "/message";
+		if (directory != null && !directory.isBlank()) path += "?directory=" + enc(directory);
+		return get(path).getAsJsonArray();
+	}
+
 
 	public JsonObject renameSession(String sessionId, String title) throws IOException {
 		JsonObject body = new JsonObject(); body.addProperty("title", title);
@@ -231,10 +278,6 @@ public final class OpenCodeService {
 		}
 	}
 
-	public JsonArray getSessionTodos(String sessionId) throws IOException {
-		return get(activeSessionPath("/session/" + sessionId + "/todo")).getAsJsonArray();
-	}
-
 	public JsonObject forkSession(String sessionId, String messageId) throws IOException {
 		JsonObject body = new JsonObject(); if (messageId != null) body.addProperty("messageID", messageId);
 		return post(activeSessionPath("/session/" + sessionId + "/fork"), body.toString()).getAsJsonObject();
@@ -264,9 +307,9 @@ public final class OpenCodeService {
 		body.add("destination", destination); body.addProperty("moveChanges", false); return body;
 	}
 
-	public JsonArray listPendingPermissions() throws IOException { return get("/permission").getAsJsonArray(); }
+	public JsonArray listPendingPermissions() throws IOException { return get(activeSessionPath("/permission")).getAsJsonArray(); }
 
-	public JsonArray listPendingQuestions() throws IOException { return get("/question").getAsJsonArray(); }
+	public JsonArray listPendingQuestions() throws IOException { return get(activeSessionPath("/question")).getAsJsonArray(); }
 
 	public boolean replyQuestion(String requestId, JsonArray answers) throws IOException {
 		JsonObject body = new JsonObject(); body.add("answers", answers);
@@ -458,7 +501,7 @@ public final class OpenCodeService {
 	public void sendPromptStreaming(String text, Consumer<OpenCodeEvent> onEvent,
 			String sessionId, String agent, String model, String variant) throws IOException, InterruptedException {
 		String body = promptBody(text, agent, model, variant).toString();
-		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri("/session/" + sid + "/message"))
+		streamRequest(sessionId, onEvent, sid -> HttpRequest.newBuilder(uri(activeSessionPath("/session/" + sid + "/message")))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build());
 	}
@@ -517,7 +560,9 @@ public final class OpenCodeService {
 						if (json.isEmpty()) continue;
 						JsonObject raw = JsonParser.parseString(json).getAsJsonObject();
 						String type = optString(raw, "type", "");
-						if (type.equals("session.created") || type.equals("session.updated") || type.equals("session.deleted"))
+						if (type.equals("session.created") || type.equals("session.updated") || type.equals("session.deleted")
+								|| type.equals("session.status") || type.equals("session.idle")
+								|| type.equals("permission.asked"))
 							onEvent.accept(new OpenCodeEvent(type, raw));
 					}
 				}
@@ -575,9 +620,23 @@ public final class OpenCodeService {
 				JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
 				OpenCodeEvent ev = new OpenCodeEvent(optString(obj, "type", ""), obj);
 				String evSid = ev.sessionID();
-				if (evSid != null && !evSid.equals(sid)
-						&& isChildSessionEvent(ev, sid, childSessionIds)) {
-					childSessionIds.add(evSid);
+				if (evSid != null && !evSid.equals(sid) && !childSessionIds.contains(evSid)) {
+					if (isChildSessionEvent(ev, sid, childSessionIds)) {
+						childSessionIds.add(evSid);
+					} else {
+						// The event payload didn't carry a resolvable parentID (e.g. the very
+						// first event, such as permission.asked, from a subagent spawned mid-turn).
+						// Fall back to a live descendant lookup so its events - including
+						// permission requests - aren't permanently dropped.
+						try {
+							for (JsonElement child : getSessionDescendants(sid)) {
+								String childId = optString(child.getAsJsonObject(), "id", null);
+								if (childId != null) childSessionIds.add(childId);
+							}
+						} catch (IOException ignored) {
+							// Best-effort refresh; the event is simply not forwarded this time.
+						}
+					}
 				}
 				if (isForwardableEvent(ev, sid, childSessionIds)) {
 					onEvent.accept(ev);
@@ -624,9 +683,15 @@ public final class OpenCodeService {
 
 	/** reply: "once" | "always" | "reject". */
 	public void respondToPermission(String permissionId, String response) throws IOException {
+		respondToPermission(permissionId, response, activeDirectory());
+	}
+
+	/** Reply to a permission in the directory scope that originated the request. */
+	public void respondToPermission(String permissionId, String response, String directory) throws IOException {
 		JsonObject body = new JsonObject();
 		body.addProperty("reply", response);
-		post(sessionPath("/permission/" + permissionId + "/reply"), body.toString());
+		String scope = directory == null || directory.isBlank() ? null : canonicalDirectory(directory);
+		post(sessionPath("/permission/" + permissionId + "/reply", scope), body.toString());
 	}
 
 	public JsonObject revertToMessage(String sessionId, String messageId) throws IOException {
@@ -720,8 +785,23 @@ public final class OpenCodeService {
 	}
 
 	private String sessionPath(String path) {
-		if (workspaceDir == null || workspaceDir.isBlank()) return path;
-		return path + (path.contains("?") ? "&" : "?") + "directory=" + enc(workspaceDir);
+		return sessionPath(path, workspaceDir);
+	}
+
+	private String sessionPath(String path, String directory) {
+		if (directory == null || directory.isBlank()) return path;
+		return path + (path.contains("?") ? "&" : "?") + "directory=" + enc(directory);
+	}
+
+	private static String canonicalDirectory(String directory) throws IOException {
+		if (directory == null || directory.isBlank()) {
+			throw new IOException("Session directory must not be blank");
+		}
+		try {
+			return java.nio.file.Path.of(directory).toRealPath().toString();
+		} catch (java.nio.file.InvalidPathException e) {
+			throw new IOException("Invalid session directory: " + directory, e);
+		}
 	}
 
 	private String activeSessionPath(String path) {

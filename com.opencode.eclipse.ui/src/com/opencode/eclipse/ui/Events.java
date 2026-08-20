@@ -1,6 +1,5 @@
 package com.opencode.eclipse.ui;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 /**
@@ -43,18 +42,6 @@ final class Events {
 	static JsonObject part(JsonObject event) {
 		JsonObject p = props(event);
 		return p != null ? p.getAsJsonObject("part") : null;
-	}
-
-	/** Successful todowrite/todoread part -> authoritative todos, or null. */
-	static JsonArray todos(JsonObject part) {
-		if (part == null || !("todowrite".equals(str(part, "tool")) || "todoread".equals(str(part, "tool"))))
-			return null;
-		JsonObject state = part.getAsJsonObject("state");
-		if (state == null || !"completed".equals(str(state, "status"))) return null;
-		JsonObject input = state.getAsJsonObject("input");
-		JsonArray todos = input != null ? input.getAsJsonArray("todos") : null;
-		JsonObject metadata = state.getAsJsonObject("metadata");
-		return todos != null ? todos : metadata != null ? metadata.getAsJsonArray("todos") : null;
 	}
 
 	/** session.error -> a human-readable message, or null. */
