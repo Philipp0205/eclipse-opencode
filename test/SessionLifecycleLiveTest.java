@@ -17,7 +17,6 @@ public final class SessionLifecycleLiveTest {
 		var children = service.getSessionChildren(parent);
 		assert child.startsWith("ses_") : fork;
 		System.out.println("fork=" + fork + " children=" + children.size());
-		assert service.getSessionTodos(parent) != null;
 		assert service.deleteSession(child);
 		assert service.deleteSession(parent);
 		service.dispose();

@@ -19,7 +19,7 @@ public final class SessionSidebarView extends ViewPart {
         details = new Label(parent, SWT.WRAP); details.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
         details.setText("Open an OpenCode Chat view to inspect its session.");
         Label sections = new Label(parent, SWT.WRAP);
-        sections.setText("\nMCP / LSP\nConnected services appear here.\n\nTODOS\nCurrent session tasks appear here.");
+        sections.setText("\nMCP / LSP\nConnected services appear here.");
         sections.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
         Label plugins = new Label(parent, SWT.WRAP | SWT.SEPARATOR); plugins.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         Label extension = new Label(parent, SWT.WRAP); extension.setText("LOCAL PLUGINS\nNo local plugin information registered yet.");

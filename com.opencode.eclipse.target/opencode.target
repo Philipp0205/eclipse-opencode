@@ -9,6 +9,6 @@
       <unit id="org.eclipse.jdt.feature.group" version="0.0.0"/>
       <unit id="com.google.gson" version="0.0.0"/>
     </location>
-    <location path="/home/phkurrle/git/EclipseExecutor/io.github.advae.eclipsemcp.server/target" type="Directory"/>
+    <location path="/home/phkurrle/git/EclipseExecutor/update-site-installed/plugins" type="Directory"/>
   </locations>
 </target>

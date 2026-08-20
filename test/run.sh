@@ -37,16 +37,24 @@ java -ea -cp "$out:$gson" com.opencode.eclipse.ui.WorkspaceRootTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.AttachmentSelectionTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/OpenCodeRequestBodyTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.OpenCodeRequestBodyTest
+javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/SessionDirectoryListingTest.java"
+java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.SessionDirectoryListingTest
+javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/PermissionRelayTest.java"
+java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.PermissionRelayTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" \
 	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/SlashCommands.java" "$here/SlashCommandsTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.ui.SlashCommandsTest
 javac -d "$out" "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/MessageQueue.java" "$here/MessageQueueTest.java"
 java -ea -cp "$out" com.opencode.eclipse.ui.MessageQueueTest
-javac -d "$out" -cp "$gson" "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/QuestionAnswers.java" "$here/QuestionAnswersTest.java"
+javac -d "$out" -cp "$gson" \
+	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/QuestionAnswers.java" "$here/QuestionAnswersTest.java"
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.QuestionAnswersTest
+javac -d "$out" -cp "$gson" \
+	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ChildSessionTracker.java" "$here/ChildSessionTrackerTest.java"
+java -ea -cp "$out:$gson" com.opencode.eclipse.ui.ChildSessionTrackerTest
 
 if [[ -n "${DISPLAY:-}" && -n "$swt_api" && -n "$swt_gtk" ]]; then
-  plugin="$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar"
+  plugin=$(ls -t "$root/com.opencode.eclipse.ui/target/"com.opencode.eclipse.ui-*-SNAPSHOT.jar 2>/dev/null | head -1)
   eclipse_plugins=$(dirname "$swt_api")
   echo "== model picker lifecycle =="
   javac -d "$out" -cp "$swt_api:$swt_gtk" \
@@ -54,15 +62,27 @@ if [[ -n "${DISPLAY:-}" && -n "$swt_api" && -n "$swt_gtk" ]]; then
     "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/ModelPicker.java" \
     "$here/ModelPickerTest.java"
   java -ea -cp "$out:$swt_api:$swt_gtk" com.opencode.eclipse.ui.ModelPickerTest
-	javac -d "$out" -cp "$out:$swt_api:$swt_gtk:$gson" \
-	  "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/TodoPanel.java" "$here/TodoPanelTest.java"
-	java -ea -cp "$out:$plugin:$swt_api:$swt_gtk:$gson" com.opencode.eclipse.ui.TodoPanelTest
+  echo "== attached files bar height policy =="
+  javac -d "$out" -cp "$swt_api:$swt_gtk" \
+    "$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/AttachedFilesBar.java" \
+    "$here/AttachedFilesBarTest.java"
+  java -ea -cp "$out:$swt_api:$swt_gtk" com.opencode.eclipse.ui.AttachedFilesBarTest
 	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson" "$here/SessionMonitorStateTest.java"
 	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson" com.opencode.eclipse.ui.SessionMonitorStateTest
-	javac -d "$out" -cp "$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar:$eclipse_plugins/*" \
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" "$here/AgentDisplayNameTest.java"
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.ui.AgentDisplayNameTest
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" "$here/PromptBuilderTest.java"
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.ui.PromptBuilderTest
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" "$here/CommandRouterMergeTest.java"
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.ui.CommandRouterMergeTest
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*" \
 	  "$here/OpenSettingsPathTest.java"
-	java -ea -cp "$out:$root/com.opencode.eclipse.ui/target/com.opencode.eclipse.ui-0.2.5-SNAPSHOT.jar:$eclipse_plugins/*" \
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*" \
 	  com.opencode.eclipse.ui.OpenSettingsPathTest
+	javac -d "$out" -cp "$plugin:$eclipse_plugins/*:$gson" \
+	  "$here/FakePreferences.java" "$here/SessionRestoreStoreTest.java" "$here/PermissionDecisionsTest.java"
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson" com.opencode.eclipse.ui.SessionRestoreStoreTest
+	java -ea -cp "$out:$plugin:$eclipse_plugins/*:$gson" com.opencode.eclipse.ui.PermissionDecisionsTest
 
   echo "== changed-file undo =="
   javac -d "$out" -cp "$plugin:$eclipse_plugins/*" "$here/DiffsTest.java"

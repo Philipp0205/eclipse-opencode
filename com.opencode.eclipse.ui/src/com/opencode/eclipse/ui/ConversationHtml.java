@@ -26,18 +26,38 @@ final class ConversationHtml {
 	static String message(String id, String role, JsonArray parts, boolean expandReasoning) {
 		String safeId = id(id != null ? id : "message");
 		String cssRole = "user".equals(role) ? "user" : "assistant";
+		boolean toolOnly = hasPlainToolPart(parts);
 		StringBuilder body = new StringBuilder();
 		if (parts != null) {
 			for (JsonElement element : parts) {
-				body.append(part(element.getAsJsonObject(), expandReasoning));
+				body.append(part(element.getAsJsonObject(), expandReasoning, toolOnly));
 			}
 		}
 		if (body.isEmpty()) {
 			return "";
 		}
+		if (toolOnly) {
+			return "<div id=\"" + safeId + "\" class=\"tool-log\">" + body + "</div>";
+		}
 		return "<section id=\"" + safeId + "\" class=\"message " + cssRole + "\">"
 				+ "<div class=\"role\">" + ("user".equals(role) ? "You" : "OpenCode") + "</div>"
 				+ "<div class=\"content\">" + body + "</div></section>";
+	}
+
+	private static boolean hasPlainToolPart(JsonArray parts) {
+		if (parts == null) return false;
+		boolean plainTool = false;
+		for (JsonElement element : parts) {
+			JsonObject part = element.getAsJsonObject();
+			String type = string(part, "type");
+			if ("agent".equals(type) || ("tool".equals(type) && !"task".equals(string(part, "tool")))) {
+				plainTool = true;
+			}
+			if ("text".equals(type) || "reasoning".equals(type)) {
+				return false;
+			}
+		}
+		return plainTool;
 	}
 
 	static String liveMessage(String id, String role, String markdown) {
@@ -54,21 +74,14 @@ final class ConversationHtml {
 				+ "<div class=\"thinking-live\">Thinking</div></section>";
 	}
 
-	static String todos(String id, JsonArray todos) {
-		JsonObject part = new JsonObject(); part.addProperty("type", "tool"); part.addProperty("tool", "todowrite");
-		JsonObject state = new JsonObject(); JsonObject input = new JsonObject(); input.add("todos", todos);
-		state.add("input", input); part.add("state", state);
-		return "<section id=\"" + id(id) + "\" class=\"current-todos\" aria-label=\"Current task progress\"><div class=\"content\">"
-				+ tool(part) + "</div></section>";
-	}
-
-	private static String part(JsonObject part, boolean expandReasoning) {
+	private static String part(JsonObject part, boolean expandReasoning, boolean compactTools) {
 		return switch (string(part, "type")) {
 			case "text" -> markdown(string(part, "text"));
 			case "reasoning" -> reasoning(part, expandReasoning);
-			case "tool" -> "task".equals(string(part, "tool")) ? taskCard(part) : tool(part);
+			case "tool" -> "task".equals(string(part, "tool")) ? taskCard(part) : tool(part, compactTools);
 			case "subtask" -> taskCard(part);
-			case "agent" -> "<div class=\"tool\"><div class=\"tool-head\">Agent · "
+			case "agent" -> compactTools ? "<div class=\"tool-line\">agent " + escape(string(part, "name"))
+					+ "</div>" : "<div class=\"tool\"><div class=\"tool-head\">Agent · "
 					+ escape(string(part, "name")) + "</div></div>";
 			default -> "";
 		};
@@ -109,51 +122,27 @@ final class ConversationHtml {
 				+ markdown(text) + "</div></details>";
 	}
 
-	private static String tool(JsonObject part) {
+	private static String tool(JsonObject part, boolean compact) {
 		String tool = string(part, "tool");
 		JsonObject state = part.getAsJsonObject("state");
 		JsonObject input = state != null ? state.getAsJsonObject("input") : null;
 		String status = string(state, "status");
 		String error = string(state, "error");
-		if (("todowrite".equals(tool) || "todoread".equals(tool)) && error == null) {
-			return todos(part, state, input);
-		}
 		String detail = first(input, "filePath", "path", "pattern", "query", "url", "command", "description");
 		String skill = "skill".equals(tool) ? first(input, "name") : null;
+		if (compact) {
+			return "<div class=\"tool-line\">" + escape(tool != null ? tool : "tool")
+					+ (skill != null ? " \"" + escape(skill) + "\"" : "")
+					+ (detail != null ? " " + escape(detail) : "")
+					+ (status != null ? " · " + escape(status) : "")
+					+ (error != null ? " <span class=\"tool-error\">" + escape(error) + "</span>" : "")
+					+ "</div>";
+		}
 		return "<div class=\"tool\"><div class=\"tool-head\">" + escape(tool != null ? tool : "tool")
 				+ (skill != null ? " \"" + escape(skill) + "\"" : "")
 				+ (status != null ? " · " + escape(status) : "") + "</div>"
 				+ (detail != null ? "<div class=\"tool-detail\">" + escape(detail) + "</div>" : "")
 				+ (error != null ? "<div class=\"tool-error\">" + escape(error) + "</div>" : "") + "</div>";
-	}
-
-	private static String todos(JsonObject part, JsonObject state, JsonObject input) {
-		JsonArray todos = input != null ? input.getAsJsonArray("todos") : null;
-		JsonObject metadata = state != null ? state.getAsJsonObject("metadata") : null;
-		if (todos == null && metadata != null) {
-			todos = metadata.getAsJsonArray("todos");
-		}
-		StringBuilder rows = new StringBuilder();
-		int completed = 0; int actionable = 0;
-		if (todos != null) {
-			for (JsonElement element : todos) {
-				JsonObject todo = element.getAsJsonObject();
-				String status = string(todo, "status");
-				boolean done = "completed".equals(status);
-				boolean current = "in_progress".equals(status); boolean cancelled = "cancelled".equals(status);
-				if (!cancelled) actionable++; if (done) completed++;
-				String icon = done ? "✓" : (current ? "●" : (cancelled ? "×" : "○"));
-				rows.append("<li class=\"todo ").append(done ? "done" : current ? "current" : cancelled ? "cancelled" : "")
-						.append("\"><span class=\"todo-status\">")
-						.append(icon).append("</span><span class=\"todo-text\">").append(escape(string(todo, "content")))
-						.append(current ? " <strong>Current</strong>" : "").append("</span><span class=\"priority\">")
-						.append(escape(string(todo, "priority")))
-						.append("</span></li>");
-			}
-		}
-		return "<details class=\"tool\" open><summary class=\"tool-head\">Todos"
-				+ (todos != null ? " · " + completed + " / " + actionable + " completed" : "")
-				+ "</summary><ul class=\"todos\">" + rows + "</ul></details>";
 	}
 
 	private static String markdown(String text) {

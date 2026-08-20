@@ -41,7 +41,7 @@ message IDs. This design supports long histories and avoids GTK's native-child
 coordinate limit encountered with one `StyledText` per message.
 
 The renderer supports message cards, Markdown, tables, code, reasoning, tools,
-todos, dark/light themes, pinned auto-scroll, welcome/setup states, and a live
+dark/light themes, pinned auto-scroll, welcome/setup states, and a live
 Thinking card. Plaintext reasoning is expanded while streaming and collapsed on
 completion; encrypted provider reasoning cannot be displayed.
 

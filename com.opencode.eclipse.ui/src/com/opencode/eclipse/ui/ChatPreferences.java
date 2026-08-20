@@ -11,4 +11,7 @@ final class ChatPreferences {
     }
     static IEclipsePreferences node() { return InstanceScope.INSTANCE.getNode(NODE); }
     static void setFontSize(int size) { node().putInt("chatFontSize", size); }
+    /** User-chosen height of the attached-files area in pixels; 0 means "one chip row". */
+    static int attachedHeight() { return node().getInt("attachedFilesHeight", 0); }
+    static void setAttachedHeight(int height) { node().putInt("attachedFilesHeight", height); }
 }

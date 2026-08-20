@@ -37,6 +37,12 @@ final class ConversationBrowser extends Composite {
 			return;
 		}
 		browser.setJavascriptEnabled(true);
+		browser.addListener(SWT.KeyDown, e -> {
+			if (e.keyCode == SWT.PAGE_UP || e.keyCode == SWT.PAGE_DOWN) {
+				scrollPage(e.keyCode == SWT.PAGE_UP);
+				e.doit = false;
+			}
+		});
 		browser.getAccessible().addAccessibleListener(new org.eclipse.swt.accessibility.AccessibleAdapter() {
 			@Override public void getName(org.eclipse.swt.accessibility.AccessibleEvent e) { e.result = "OpenCode conversation"; }
 		});
@@ -86,6 +92,11 @@ final class ConversationBrowser extends Composite {
 
 	void clear() {
 		execute("reset('')");
+	}
+
+	/** Scrolls the transcript by roughly one viewport height. */
+	void scrollPage(boolean up) {
+		execute("window.scrollBy(0, " + (up ? "-" : "") + "window.innerHeight * 0.9)");
 	}
 
 	Object evaluate(String script) {
