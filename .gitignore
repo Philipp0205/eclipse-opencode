@@ -3,3 +3,4 @@ bin/
 runtime-opencode/
 com.opencode.eclipse.ui/src/test.json
 .slim/deepwork/
+.settings/

@@ -251,8 +251,21 @@ public final class OpenCodeService {
 		return patch(activeSessionPath("/session/" + sessionId), body.toString()).getAsJsonObject();
 	}
 
+	/** Rename a session explicitly scoped to {@code directory}, without requiring this service's
+	 * active session/workspace to match — for callers (e.g. a session history view) acting on a
+	 * session that may not currently be open in any ChatView. */
+	public JsonObject renameSession(String directory, String sessionId, String title) throws IOException {
+		JsonObject body = new JsonObject(); body.addProperty("title", title);
+		return patch(sessionPath("/session/" + sessionId, canonicalDirectory(directory)), body.toString()).getAsJsonObject();
+	}
+
 	public boolean deleteSession(String sessionId) throws IOException {
 		return delete("/session/" + sessionId).getAsBoolean();
+	}
+
+	/** Delete a session explicitly scoped to {@code directory}; see {@link #renameSession(String, String, String)}. */
+	public boolean deleteSession(String directory, String sessionId) throws IOException {
+		return delete(sessionPath("/session/" + sessionId, canonicalDirectory(directory))).getAsBoolean();
 	}
 
 	public JsonArray getSessionChildren(String sessionId) throws IOException {
