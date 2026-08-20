@@ -22,6 +22,9 @@ final class ChatViewRegistry {
 	static void remove(ChatView view) { if (ENTRIES.remove(view) != null) notifyListeners(); }
 	static void active(ChatView view) { if (active != view) { active = view; notifyListeners(); } }
 	static ChatView active() { return active != null && ENTRIES.containsKey(active) ? active : ENTRIES.keySet().stream().findFirst().orElse(null); }
+	static ChatView find(String directory, String sessionId) {
+		return ENTRIES.keySet().stream().filter(view -> view.matchesExplorerTarget(directory, sessionId)).findFirst().orElse(null);
+	}
 	static List<Entry> snapshot() { return List.copyOf(ENTRIES.values()); }
 	static void addListener(Runnable listener) { LISTENERS.add(listener); }
 	static void removeListener(Runnable listener) { LISTENERS.remove(listener); }

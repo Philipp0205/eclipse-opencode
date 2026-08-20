@@ -28,6 +28,21 @@
       <view id="com.opencode.eclipse.ui.sessionSidebarView" name="OpenCode Context"
             icon="icons/opencode-16.png" category="com.opencode.eclipse.ui.category"
             class="com.opencode.eclipse.ui.SessionSidebarView" restorable="true"/>
+      <view id="com.opencode.eclipse.ui.sessionsExplorerView" name="Sessions Explorer"
+            icon="icons/opencode-16.png" category="com.opencode.eclipse.ui.category"
+            class="com.opencode.eclipse.ui.SessionsExplorerView" restorable="true"/>
+   </extension>
+   <extension point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension targetID="org.eclipse.jdt.ui.JavaPerspective">
+         <view id="com.opencode.eclipse.ui.sessionMonitorView"
+               relative="org.eclipse.jdt.ui.PackageExplorer"
+               relationship="bottom" ratio="0.5" visible="false"/>
+      </perspectiveExtension>
+      <perspectiveExtension targetID="org.eclipse.ui.resourcePerspective">
+         <view id="com.opencode.eclipse.ui.sessionMonitorView"
+               relative="org.eclipse.ui.navigator.ProjectExplorer"
+               relationship="bottom" ratio="0.5" visible="false"/>
+      </perspectiveExtension>
    </extension>
    <extension point="org.eclipse.ui.preferencePages">
       <page id="com.opencode.eclipse.ui.chatPreferences" name="OpenCode Chat"
@@ -69,22 +84,30 @@
                   tooltip="Open OpenCode Chat"/>
          </toolbar>
       </menuContribution>
-      <menuContribution locationURI="toolbar:com.opencode.eclipse.ui.chatView">
-         <command
-               commandId="com.opencode.eclipse.ui.commands.newSession"
-               icon="icons/chat/new_chat.png"
-               style="push"
-               tooltip="New Session"/>
-         <command
-               commandId="com.opencode.eclipse.ui.commands.openSettings"
-               icon="icons/settings.png"
-               style="push"
-               tooltip="Open opencode.json"/>
-      </menuContribution>
+       <menuContribution locationURI="toolbar:com.opencode.eclipse.ui.chatView">
+          <command
+                commandId="com.opencode.eclipse.ui.commands.newSession"
+                icon="icons/chat/new_chat.png"
+                style="push"
+                tooltip="New Session"/>
+          <command
+                commandId="com.opencode.eclipse.ui.commands.openChat"
+                icon="icons/opencode-16.png"
+                style="push"
+                tooltip="Open Another Chat View"/>
+          <command
+                commandId="com.opencode.eclipse.ui.commands.openSettings"
+                icon="icons/settings.png"
+                style="push"
+                tooltip="Open opencode.json"/>
+       </menuContribution>
    </extension>
    <extension point="org.eclipse.ui.editors">
       <editor id="com.opencode.eclipse.ui.untitledPromptEditor"
             name="Untitled prompt" class="com.opencode.eclipse.ui.UntitledPromptEditor"
             />
+   </extension>
+   <extension point="org.eclipse.ui.startup">
+      <startup class="com.opencode.eclipse.ui.ProbeStartup"/>
    </extension>
 </plugin>
