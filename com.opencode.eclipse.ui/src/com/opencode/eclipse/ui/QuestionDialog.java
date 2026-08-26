@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.eclipse.jface.dialogs.Dialog;
+import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
@@ -29,22 +30,30 @@ final class QuestionDialog extends Dialog {
 
 	@Override protected void configureShell(Shell shell) { super.configureShell(shell); shell.setText("OpenCode question"); }
 
+	@Override protected boolean isResizable() { return true; }
+
 	@Override protected Control createDialogArea(Composite parent) {
 		Composite area = (Composite) super.createDialogArea(parent);
 		area.setLayout(new GridLayout(1, false));
+		// Bound the preferred width so long questions/options wrap instead of
+		// stretching the (previously fixed-size) shell to the text length.
+		int width = convertHorizontalDLUsToPixels(IDialogConstants.MINIMUM_MESSAGE_AREA_WIDTH);
 		for (JsonElement element : questions) {
 			JsonObject question = element.getAsJsonObject();
 			Label title = new Label(area, SWT.WRAP); title.setText(Events.str(question, "question"));
-			title.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+			title.setLayoutData(wrapped(width));
 			Composite choices = new Composite(area, SWT.NONE);
-			choices.setLayout(new GridLayout(1, false));
+			GridLayout choicesLayout = new GridLayout(1, false);
+			choicesLayout.marginWidth = 0;
+			choices.setLayout(choicesLayout);
 			choices.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 			boolean multiple = question.has("multiple") && question.get("multiple").getAsBoolean();
 			List<Button> buttons = new ArrayList<>();
 			for (JsonElement optionElement : question.getAsJsonArray("options")) {
 				JsonObject option = optionElement.getAsJsonObject();
-				Button button = new Button(choices, multiple ? SWT.CHECK : SWT.RADIO);
+				Button button = new Button(choices, (multiple ? SWT.CHECK : SWT.RADIO) | SWT.WRAP);
 				button.setText(Events.str(option, "label") + " — " + Events.str(option, "description"));
+				button.setLayoutData(wrapped(width));
 				button.setData(Events.str(option, "label")); buttons.add(button);
 			}
 			options.add(buttons);
@@ -53,6 +62,13 @@ final class QuestionDialog extends Dialog {
 			text.setEnabled(allowCustom); text.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false)); custom.add(text);
 		}
 		return area;
+	}
+
+	/** FILL grid data whose width hint keeps wrapping controls at dialog width. */
+	private static GridData wrapped(int widthHint) {
+		GridData data = new GridData(SWT.FILL, SWT.CENTER, true, false);
+		data.widthHint = widthHint;
+		return data;
 	}
 
 	@Override protected void okPressed() {
