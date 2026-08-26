@@ -27,7 +27,12 @@ import org.eclipse.ui.dialogs.ElementListSelectionDialog;
 
 /**
  * Opens Eclipse's built-in compare (diff) view for a file opencode edited,
- * showing the pre-edit snapshot (left) against the current on-disk content (right).
+ * showing the current on-disk content (left) against the pre-edit snapshot (right).
+ *
+ * <p>Eclipse Compare paints two-way diffs treating the left side as the newer
+ * revision: ranges present only on the left are additions (green), ranges
+ * present only on the right are deletions (red). The edited result therefore
+ * must be the left input or insert/delete colors render inverted.
  *
  * <p>ponytail: reuses {@link CompareUI} — no custom diff widget. Snapshots are
  * captured lazily the first time a path is seen edited during a turn.
@@ -153,12 +158,12 @@ final class Diffs {
 		if (reviewer != null) { reviewer.accept(absolutePath); return; }
 		String name = Path.of(absolutePath).getFileName().toString();
 		CompareConfiguration cfg = new CompareConfiguration();
-		cfg.setLeftLabel(patchOnly ? name + " (no snapshot)" : name + " (before opencode)");
-		cfg.setRightLabel(patchOnly ? name + " (unified patch)" : name + " (after)");
+		cfg.setLeftLabel(patchOnly ? name + " (unified patch)" : name + " (after opencode)");
+		cfg.setRightLabel(patchOnly ? name + " (no snapshot)" : name + " (before)");
 		cfg.setLeftEditable(false);
 		cfg.setRightEditable(false);
 		CompareEditorInput input = new TextCompareInput(cfg, name,
-				new StringElement(name, before), new StringElement(name, patchOnly ? server.patch : after));
+				new StringElement(name, patchOnly ? server.patch : after), new StringElement(name, before));
 		CompareUI.openCompareEditor(input);
 		if (Boolean.getBoolean("opencode.wholeViewProbe")) {
 			System.out.println("[OpenCodeProbe] PASS compare opened " + name);
