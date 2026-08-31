@@ -32,7 +32,7 @@ uses OpenCode's HTTP and SSE APIs directly through the JDK `HttpClient`.
 
 ## Requirements
 
-- `opencode` on `PATH` (the plugin spawns `opencode serve --port 0`).
+- `opencode` on `PATH` (the plugin starts a private loopback server on a reserved port).
 - Eclipse 2025-03+, Java 21 (build target platform requires it).
 - Linux requires WebKitGTK for the SWT Browser conversation view.
 
@@ -70,11 +70,33 @@ Before publishing an update, bump the semantic version in all POMs, both bundle
 manifests, and `com.opencode.eclipse.feature/feature.xml`. Eclipse update checks
 must not rely only on qualifier timestamps.
 
+## GitHub Update Site
+
+Install from *Help → Install New Software → Add…* using:
+
+```text
+https://philipp0205.github.io/eclipse-opencode/
+```
+
+The [GitHub Actions workflow](.github/workflows/publish-update-site.yml) builds the
+Tycho p2 repository and deploys it to GitHub Pages after changes reach `master`.
+Deployment replaces the complete Pages artifact, so obsolete feature and plugin
+JARs are removed.
+
+The workflow verifies that the semantic version is synchronized across all POMs,
+bundle manifests, and `feature.xml`. If GitHub Pages already has the same semantic
+version, it skips deployment rather than publishing a newer qualifier as a false
+update. Bump the semantic plugin version whenever publishing a new build.
+
+After publishing, Eclipse may retain cached p2 metadata. Refresh it under
+*Preferences → Install/Update → Available Software Sites → Reload*, then use
+*Help → Check for Updates*.
+
 ## Internal Update Site
 
 `/home/phkurrle` is a company NFS share, so publish the repository to the stable
-shared directory `/home/phkurrle/public/eclipse-opencode-update-site`. This avoids
-HTTP policy and certificate changes on every Eclipse installation.
+shared directory `/home/phkurrle/public/eclipse-opencode-update-site` when an
+offline company-network mirror is needed.
 
 Build and publish with:
 
@@ -97,10 +119,8 @@ This only works on workstations that mount the same company home directory at
 infrastructure with a company-trusted HTTPS certificate; plain HTTP or a
 self-signed certificate requires client-side Eclipse configuration.
 
-After publishing, Eclipse may retain cached p2 metadata. Refresh it under
-*Preferences → Install/Update → Available Software Sites → Reload*, then use
-*Help → Check for Updates*. Removing and re-adding the site also clears the
-cache, but Reload is preferable.
+Removing and re-adding a site also clears Eclipse's cache, but Reload is
+preferable.
 
 ## Test
 

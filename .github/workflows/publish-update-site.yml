@@ -1,0 +1,75 @@
+name: Publish Eclipse update site
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build p2 repository
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build update site
+        run: ./mvnw -q -B clean verify
+
+      - name: Verify p2 metadata and semantic version
+        id: version
+        env:
+          CURRENT_SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/content.jar
+        run: |
+          python3 .github/verify-update-site.py \
+            com.opencode.eclipse.repository/target/repository \
+            --github-output "$GITHUB_OUTPUT" \
+            --current-site "$CURRENT_SITE"
+
+      - name: Add update-site landing page
+        if: steps.version.outputs.publish == 'true'
+        run: cp .github/update-site-index.html com.opencode.eclipse.repository/target/repository/index.html
+
+      - name: Configure GitHub Pages
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
+      - name: Upload p2 repository
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: com.opencode.eclipse.repository/target/repository
+
+  deploy:
+    name: Deploy update site
+    if: needs.build.outputs.publish == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

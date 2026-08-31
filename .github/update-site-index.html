@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCode for Eclipse update site</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 44rem; margin: 4rem auto; padding: 0 1.5rem; line-height: 1.6; }
+    code { padding: .2rem .4rem; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+  </style>
+</head>
+<body>
+  <h1>OpenCode for Eclipse</h1>
+  <p>This GitHub Pages site is an Eclipse p2 software repository.</p>
+  <ol>
+    <li>In Eclipse, open <strong>Help → Install New Software…</strong>.</li>
+    <li>Choose <strong>Add…</strong>.</li>
+    <li>Use this page’s URL as the location.</li>
+    <li>Select <strong>OpenCode for Eclipse</strong> and complete the wizard.</li>
+  </ol>
+  <p>Update-site URL: <code id="site"></code></p>
+  <p><a href="https://github.com/Philipp0205/eclipse-opencode">Source and documentation</a></p>
+  <script>
+    const url = new URL(".", window.location.href).href;
+    document.getElementById("site").textContent = url;
+  </script>
+</body>
+</html>
