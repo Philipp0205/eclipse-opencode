@@ -149,6 +149,7 @@ public final class ChatView extends ViewPart {
 		ChatPreferences.node().addPreferenceChangeListener(fontListener);
 
 		startServerAsync();
+		watchStartup();
 		installEditorListener();
 		publishMonitorState();
 	}
@@ -491,6 +492,32 @@ public final class ChatView extends ViewPart {
 
 	// ---- server startup ---------------------------------------------------
 
+	/** Longest the view may claim to be starting before it says what is wrong instead. */
+	private static final int STARTUP_WATCHDOG_MS = 120_000;
+	private volatile boolean startupFinished;
+
+	/**
+	 * Replace a permanent "Starting opencode…" with something actionable.
+	 *
+	 * <p>Startup is a chain of server calls, and every one of them can be slowed or stalled by
+	 * the opencode server itself. Without this, a stalled step leaves the view looking like it
+	 * is still loading, with no hint that the local server is the problem.
+	 */
+	private void watchStartup() {
+		Display.getDefault().timerExec(STARTUP_WATCHDOG_MS, () -> {
+			if (startupFinished || input == null || input.isDisposed()) return;
+			String output = service.serverOutput().trim();
+			conversation.putMessage("startup-stalled", "assistant",
+					"**opencode is not responding.**\n\nThe local `opencode serve` process started but "
+							+ "did not finish answering this view's startup requests within "
+							+ (STARTUP_WATCHDOG_MS / 1000) + "s.\n\n"
+							+ (output.isEmpty() ? "It printed no output.\n" : "Its output was:\n\n```\n" + output + "\n```\n")
+							+ "\nClose and reopen the view to retry. If it keeps happening, check that "
+							+ "`opencode serve` starts normally in this workspace from a terminal.");
+			setStatus("opencode did not respond while starting · see the message above");
+		});
+	}
+
 	private void startServerAsync() {
 		new Thread(() -> {
 			try {
@@ -553,6 +580,7 @@ public final class ChatView extends ViewPart {
 				String configModel = config.has("model") ? config.get("model").getAsString() : null;
 				String defaultAgent = config.has("default_agent") ? config.get("default_agent").getAsString()
 						: config.has("defaultAgent") ? config.get("defaultAgent").getAsString() : null;
+				startupFinished = true;
 				ui(() -> {
 					mcpServers = connectedMcpServers(mcp);
 					providerConnected = providerStatus.getAsJsonArray("connected") != null
@@ -577,6 +605,7 @@ public final class ChatView extends ViewPart {
 					}
 				});
 			} catch (Exception ex) {
+				startupFinished = true;
 				ui(() -> setStatus("Failed to start opencode: " + ex.getMessage()));
 			}
 		}, "opencode-startup").start();
@@ -1083,7 +1112,8 @@ public final class ChatView extends ViewPart {
 				+ String.format(java.util.Locale.ROOT, "\nCost: $%.2f", sessionCost)
 				+ "\nWorking folder: " + workingFolder
 				+ "\nSession ID: " + service.getCurrentSessionId()
-				+ "\nConnected MCP servers: " + mcpServers;
+				+ "\nConnected MCP servers: " + mcpServers
+				+ "\nopencode version: " + (service.getServerVersion() != null ? service.getServerVersion() : "unknown");
 		new InfoDialog(getSite().getShell(), details).open();
 	}
 
