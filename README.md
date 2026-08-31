@@ -83,6 +83,10 @@ Tycho p2 repository and deploys it to GitHub Pages after changes reach `master`.
 Deployment replaces the complete Pages artifact, so obsolete feature and plugin
 JARs are removed.
 
+Before its first run, a repository owner must select **GitHub Actions** under
+*Settings → Pages → Build and deployment → Source*. GitHub does not allow a
+workflow's built-in `GITHUB_TOKEN` to enable Pages itself.
+
 The workflow verifies that the semantic version is synchronized across all POMs,
 bundle manifests, and `feature.xml`. If GitHub Pages already has the same semantic
 version, it skips deployment rather than publishing a newer qualifier as a false

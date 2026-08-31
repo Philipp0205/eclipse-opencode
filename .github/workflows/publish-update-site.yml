@@ -52,8 +52,6 @@ jobs:
       - name: Configure GitHub Pages
         if: steps.version.outputs.publish == 'true'
         uses: actions/configure-pages@v6
-        with:
-          enablement: true
 
       - name: Upload p2 repository
         if: steps.version.outputs.publish == 'true'
