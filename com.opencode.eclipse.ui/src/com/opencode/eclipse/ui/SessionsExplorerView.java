@@ -27,10 +27,11 @@ public final class SessionsExplorerView extends ViewPart {
     private volatile boolean disposed;
     private int refreshGeneration;
     private String lastSignature;
-    // Generous enough to cover a cold "opencode serve" start (up to ~25s, see
-    // OpenCodeService.initialize) plus a full listSessions round trip, even when several
-    // ChatView/SessionsExplorerView instances restore concurrently after an Eclipse restart.
-    private static final int LOAD_TIMEOUT_MS = 45_000;
+    // Generous enough to cover a cold "opencode serve" start (up to ~25s waiting for the listen
+    // URL plus ~20s of health polling, see OpenCodeService.initialize) plus a full listSessions
+    // round trip, even when several ChatView/SessionsExplorerView instances restore concurrently
+    // after an Eclipse restart.
+    private static final int LOAD_TIMEOUT_MS = 70_000;
     private final Runnable registryRefresh = this::scheduleRefresh;
     private static final java.util.List<SessionsExplorerView> INSTANCES = new java.util.concurrent.CopyOnWriteArrayList<>();
 

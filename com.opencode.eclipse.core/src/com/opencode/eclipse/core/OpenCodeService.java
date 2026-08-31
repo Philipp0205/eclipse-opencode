@@ -4,6 +4,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -11,11 +13,17 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -41,8 +49,37 @@ import com.google.gson.JsonParser;
  */
 public final class OpenCodeService {
 
+	/**
+	 * Any loopback URL the server may print. Deliberately not tied to the word "listening":
+	 * opencode's startup banner has changed wording more than once (it now prints an
+	 * {@code OPENCODE_SERVER_PASSWORD} warning first), so the port is matched instead.
+	 */
 	private static final Pattern LISTEN_URL =
-			Pattern.compile("http://[0-9.]+:[0-9]+");
+			Pattern.compile("http://(?:127\\.0\\.0\\.1|localhost|\\[::1\\]|0\\.0\\.0\\.0):(\\d+)");
+
+	/** Password line printed by builds that secure the server with a generated credential. */
+	private static final Pattern PRINTED_PASSWORD =
+			Pattern.compile("(?i)server password\\s*[:=]?\\s*(\\S+)");
+
+	/** Basic-auth user the server expects alongside {@code OPENCODE_SERVER_PASSWORD}. */
+	private static final String AUTH_USER = "opencode";
+
+	private static final Duration LISTEN_TIMEOUT = Duration.ofSeconds(25);
+	private static final Duration HEALTH_TIMEOUT = Duration.ofSeconds(20);
+	/**
+	 * Bounds only the *headers* of an SSE subscription; the stream itself stays open.
+	 * Overridable with {@code -Dopencode.eventTimeoutSeconds} so tests need not wait 30s.
+	 */
+	private static final Duration EVENT_HEADER_TIMEOUT =
+			Duration.ofSeconds(Long.getLong("opencode.eventTimeoutSeconds", 30));
+	/**
+	 * Silence after which a turn is completed from server status instead of waiting forever.
+	 * Overridable with {@code -Dopencode.stallTimeoutSeconds}.
+	 */
+	private static final Duration STREAM_STALL_TIMEOUT =
+			Duration.ofSeconds(Long.getLong("opencode.stallTimeoutSeconds", 60));
+	private static final int START_ATTEMPTS = 3;
+	private static final int SERVER_LOG_LINES = 40;
 
 	// HTTP/1.1 forced: opencode's server hangs the JDK client's HTTP/2 (h2c) upgrade handshake.
 	private final HttpClient http = HttpClient.newBuilder()
@@ -52,6 +89,10 @@ public final class OpenCodeService {
 	private volatile Process process;
 	private volatile String baseUrl;
 	private volatile String workspaceDir;
+	private volatile String serverPassword;
+	private volatile String serverVersion;
+	/** Last lines the server printed, for actionable startup failures. */
+	private final Deque<String> serverLog = new ArrayDeque<>();
 	private final AtomicReference<String> currentSessionId = new AtomicReference<>();
 	private final ConcurrentHashMap<String, PromptRun> prompts = new ConcurrentHashMap<>();
 	private final AtomicReference<InputStream> eventStream = new AtomicReference<>();
@@ -63,68 +104,227 @@ public final class OpenCodeService {
 		final String sessionId;
 		final AtomicReference<InputStream> stream = new AtomicReference<>();
 		final AtomicReference<IOException> failure = new AtomicReference<>();
+		final AtomicLong lastEvent = new AtomicLong(System.nanoTime());
 		volatile CompletableFuture<HttpResponse<String>> post;
 		volatile boolean cancelled;
+		/** Set when the stall watchdog ended the turn because the server reports it finished. */
+		volatile boolean completedByStatus;
 
 		PromptRun(String sessionId) { this.sessionId = sessionId; }
 	}
 
 	// ---- lifecycle --------------------------------------------------------
 
-	/** Spawn {@code opencode serve} in {@code workspaceRoot} and wait for the listen URL. */
+	/**
+	 * Spawn {@code opencode serve} in {@code workspaceRoot} and wait until it answers.
+	 *
+	 * <p>The port is reserved here instead of delegating to {@code --port 0}: opencode stopped
+	 * honouring port 0 as "let the OS pick" and now binds its well-known default port (4096),
+	 * which makes every Eclipse-owned server fight the user's own TUI/desktop instance for one
+	 * port. An explicit loopback port keeps one private server per view, and a lost bind race
+	 * is retried with a fresh port because the CLI exits rather than falling back.
+	 */
 	public synchronized void initialize(String workspaceRoot) throws IOException {
 		if (baseUrl != null) {
 			return;
 		}
 		this.workspaceDir = workspaceRoot;
-		var pb = new ProcessBuilder("opencode", "serve", "--port", "0", "--hostname", "127.0.0.1");
+		IOException lastFailure = null;
+		for (int attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+			try {
+				startServer(workspaceRoot);
+				return;
+			} catch (IOException e) {
+				dispose();
+				lastFailure = e;
+				if (!isPortConflict(serverOutput())) break;
+			}
+		}
+		throw lastFailure;
+	}
+
+	private void startServer(String workspaceRoot) throws IOException {
+		int port = reservePort();
+		synchronized (serverLog) { serverLog.clear(); }
+		serverPassword = envServerPassword();
+		var pb = new ProcessBuilder("opencode", "serve", "--port", String.valueOf(port),
+				"--hostname", "127.0.0.1");
 		pb.environment().put("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "true");
 		if (workspaceRoot != null) {
 			pb.directory(new java.io.File(workspaceRoot));
 		}
 		pb.redirectErrorStream(true);
-		process = pb.start();
+		Process started = process = pb.start();
 
 		CompletableFuture<String> listening = new CompletableFuture<>();
 		Thread drain = new Thread(() -> {
 			try (var reader = new BufferedReader(new InputStreamReader(
-					process.getInputStream(), StandardCharsets.UTF_8))) {
+					started.getInputStream(), StandardCharsets.UTF_8))) {
 				String line;
 				while ((line = reader.readLine()) != null) {
-					Matcher matcher = LISTEN_URL.matcher(line);
-					if (!listening.isDone() && line.contains("listening") && matcher.find()) {
-						listening.complete(matcher.group());
-					}
+					record(line);
+					String password = parsePrintedPassword(line);
+					if (password != null) serverPassword = password;
+					String url = parseListenUrl(line, port);
+					if (url != null && !listening.isDone()) listening.complete(url);
 				}
-				if (!listening.isDone()) listening.completeExceptionally(
-						new IOException("opencode exited before reporting a listen URL"));
-			} catch (IOException e) {
-				if (!listening.isDone()) listening.completeExceptionally(e);
+			} catch (IOException ignored) {
+				// Process teardown closes the pipe; onExit below reports the real outcome.
 			}
 		}, "opencode-stdout");
 		drain.setDaemon(true);
 		drain.start();
+		started.onExit().thenRun(() -> {
+			if (!listening.isDone()) listening.completeExceptionally(new IOException(
+					"opencode serve exited with code " + started.exitValue() + describeOutput()));
+		});
 		try {
-			baseUrl = listening.get(25, TimeUnit.SECONDS);
-			JsonObject health = get("/global/health").getAsJsonObject();
-			if (!health.has("healthy") || !health.get("healthy").getAsBoolean()) {
-				throw new IOException("opencode server is not healthy");
-			}
+			baseUrl = listening.get(LISTEN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+			awaitHealthy();
 		} catch (TimeoutException e) {
-			dispose();
-			throw new IOException("opencode server did not report a listen URL within 25s", e);
+			throw new IOException("opencode server did not report a listen URL within "
+					+ LISTEN_TIMEOUT.toSeconds() + "s" + describeOutput(), e);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-			dispose();
 			throw new IOException("Interrupted while starting opencode", e);
-		} catch (java.util.concurrent.ExecutionException e) {
-			dispose();
-			throw new IOException("Failed to start opencode", e.getCause());
+		} catch (ExecutionException e) {
+			Throwable cause = e.getCause();
+			throw cause instanceof IOException io ? io : new IOException("Failed to start opencode", cause);
 		}
+	}
+
+	/**
+	 * Poll {@code /global/health} until the server answers: it prints its listen URL before it
+	 * is necessarily able to serve, so a single request can lose the race and used to surface
+	 * as an unexplained startup failure.
+	 */
+	private void awaitHealthy() throws IOException, InterruptedException {
+		long deadline = System.nanoTime() + HEALTH_TIMEOUT.toNanos();
+		IOException lastFailure = null;
+		while (System.nanoTime() < deadline) {
+			Process running = process;
+			if (running != null && !running.isAlive()) {
+				throw new IOException("opencode serve exited with code " + running.exitValue() + describeOutput());
+			}
+			try {
+				probeHealth();
+				return;
+			} catch (Unrecoverable e) {
+				throw e;
+			} catch (IOException e) {
+				lastFailure = e;
+				Thread.sleep(250);
+			}
+		}
+		throw new IOException("opencode server did not become healthy within " + HEALTH_TIMEOUT.toSeconds()
+				+ "s" + describeOutput(), lastFailure);
+	}
+
+	private void probeHealth() throws IOException, InterruptedException {
+		HttpResponse<String> response = http.send(authorized(HttpRequest.newBuilder(uri("/global/health")))
+				.timeout(Duration.ofSeconds(5)).GET().build(), BodyHandlers.ofString(StandardCharsets.UTF_8));
+		if (response.statusCode() == 401 || response.statusCode() == 403) {
+			throw new Unrecoverable("opencode server requires a password. Set OPENCODE_SERVER_PASSWORD in the "
+					+ "environment Eclipse runs in, or unset it so the server starts unsecured.");
+		}
+		if (response.statusCode() >= 400) {
+			throw new IOException("opencode GET /global/health -> " + response.statusCode() + ": " + response.body());
+		}
+		JsonObject health = JsonParser.parseString(response.body()).getAsJsonObject();
+		if (!health.has("healthy") || !health.get("healthy").getAsBoolean()) {
+			throw new IOException("opencode server is not healthy");
+		}
+		serverVersion = optString(health, "version", null);
+	}
+
+	/** A startup failure that retrying cannot fix, such as a rejected credential. */
+	private static final class Unrecoverable extends IOException {
+		private static final long serialVersionUID = 1L;
+
+		Unrecoverable(String message) { super(message); }
+	}
+
+	/** Loopback URL printed by the server, preferring the port we asked for. */
+	static String parseListenUrl(String line, int expectedPort) {
+		if (line == null) return null;
+		Matcher matcher = LISTEN_URL.matcher(line);
+		String fallback = null;
+		while (matcher.find()) {
+			if (String.valueOf(expectedPort).equals(matcher.group(1))) return matcher.group();
+			if (fallback == null) fallback = matcher.group();
+		}
+		return fallback;
+	}
+
+	static String parsePrintedPassword(String line) {
+		if (line == null) return null;
+		Matcher matcher = PRINTED_PASSWORD.matcher(line);
+		return matcher.find() ? matcher.group(1) : null;
+	}
+
+	/** {@code Authorization} value for the server's HTTP basic auth. */
+	static String basicAuthHeader(String password) {
+		return "Basic " + Base64.getEncoder().encodeToString(
+				(AUTH_USER + ":" + password).getBytes(StandardCharsets.UTF_8));
+	}
+
+	/** True when the captured server output shows the requested port was taken. */
+	static boolean isPortConflict(String output) {
+		if (output == null) return false;
+		String lower = output.toLowerCase(Locale.ROOT);
+		return lower.contains("serveerror") || lower.contains("eaddrinuse") || lower.contains("already in use");
+	}
+
+	private static String envServerPassword() {
+		String password = System.getenv("OPENCODE_SERVER_PASSWORD");
+		return password == null || password.isBlank() ? null : password;
+	}
+
+	/** Reserve a free loopback port so the plugin never claims opencode's default port. */
+	private static int reservePort() throws IOException {
+		try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+			return socket.getLocalPort();
+		}
+	}
+
+	private void record(String line) {
+		synchronized (serverLog) {
+			serverLog.addLast(line);
+			while (serverLog.size() > SERVER_LOG_LINES) serverLog.removeFirst();
+		}
+	}
+
+	/** Last lines the server printed; empty when it printed nothing. */
+	public String serverOutput() {
+		synchronized (serverLog) {
+			return String.join("\n", serverLog);
+		}
+	}
+
+	private String describeOutput() {
+		String output = serverOutput().trim();
+		return output.isEmpty() ? "" : ". opencode said: " + output;
+	}
+
+	/** Server version reported by {@code /global/health}, or null before startup finished. */
+	public String getServerVersion() {
+		return serverVersion;
 	}
 
 	public boolean isReady() {
 		return baseUrl != null;
+	}
+
+	/**
+	 * Point this service at an already-running server instead of spawning one.
+	 *
+	 * <p>Only used by the tests under {@code test/}, which exercise the HTTP/SSE behaviour
+	 * (auth headers, bounded subscriptions, stalled turns) against a stub server.
+	 */
+	void attach(String baseUrl, String directory, String password) {
+		this.baseUrl = baseUrl;
+		this.workspaceDir = directory;
+		this.serverPassword = password;
 	}
 
 	public String getWorkspaceRoot() {
@@ -153,6 +353,7 @@ public final class OpenCodeService {
 			waiter.start();
 		}
 		baseUrl = null;
+		serverVersion = null;
 		currentSessionId.set(null);
 		currentSessionTitle = "New Session";
 		currentSessionDirectory = null;
@@ -193,7 +394,7 @@ public final class OpenCodeService {
 	}
 
 	public JsonObject getSessionStatus() throws IOException {
-		return get("/session/status").getAsJsonObject();
+		return get(activeSessionPath("/session/status")).getAsJsonObject();
 	}
 
 	public boolean isSessionBusy(String sessionId) {
@@ -561,9 +762,7 @@ public final class OpenCodeService {
 			AtomicReference<InputStream> watched = new AtomicReference<>();
 			try {
 				String dir = workspaceDir != null ? workspaceDir : System.getProperty("user.dir");
-				HttpRequest request = HttpRequest.newBuilder(uri("/event?directory=" + enc(dir)))
-						.header("Accept", "text/event-stream").GET().build();
-				HttpResponse<InputStream> response = http.send(request, BodyHandlers.ofInputStream());
+				HttpResponse<InputStream> response = openEventStream("/event?directory=" + enc(dir));
 				if (response.statusCode() != 200) return;
 				InputStream stream = response.body(); watched.set(stream); eventStream.set(stream);
 				try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
@@ -603,13 +802,13 @@ public final class OpenCodeService {
 				if (childId != null) childSessionIds.add(childId);
 			}
 			String dir = activeDirectory();
-			HttpRequest sub = HttpRequest.newBuilder(uri("/event?directory=" + enc(dir)))
-					.header("Accept", "text/event-stream").GET().build();
-			HttpResponse<InputStream> resp = http.send(sub, BodyHandlers.ofInputStream());
+			HttpResponse<InputStream> resp = openEventStream("/event?directory=" + enc(dir));
 			if (resp.statusCode() != 200) throw new IOException("Event subscription failed: " + resp.statusCode());
 			InputStream eventStream = resp.body();
 			run.stream.set(eventStream);
-			HttpRequest prompt = requestFactory.apply(sid);
+			watchForStall(run);
+			HttpRequest prompt = authorized(HttpRequest.newBuilder(requestFactory.apply(sid),
+					(name, value) -> !name.equalsIgnoreCase("Authorization"))).build();
 			run.post = http.sendAsync(prompt, BodyHandlers.ofString(StandardCharsets.UTF_8));
 			run.post.whenComplete((response, error) -> {
 				if (error != null || response.statusCode() >= 400) {
@@ -630,6 +829,7 @@ public final class OpenCodeService {
 				if (json.isEmpty()) {
 					continue;
 				}
+				run.lastEvent.set(System.nanoTime());
 				JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
 				OpenCodeEvent ev = new OpenCodeEvent(optString(obj, "type", ""), obj);
 				String evSid = ev.sessionID();
@@ -660,17 +860,87 @@ public final class OpenCodeService {
 			} catch (IOException streamError) {
 				IOException failure = run.failure.get();
 				if (failure != null) throw failure;
-				if (!run.cancelled) throw streamError;
+				if (!run.cancelled && !run.completedByStatus) throw streamError;
 			}
 			IOException failure = run.failure.get();
 			if (failure != null) throw failure;
-			if (!idle && !run.cancelled) {
+			if (!idle && !run.cancelled && !run.completedByStatus) {
 				abortQuietly(sid);
 				throw new IOException("Event stream ended before session became idle");
 			}
 		} finally {
 			cancelRun(run);
 			prompts.remove(sid, run);
+		}
+	}
+
+	/**
+	 * Subscribe to SSE with a bounded wait for the response headers only.
+	 *
+	 * <p>{@code HttpClient.send} has no timeout here on purpose — the body must stay open for the
+	 * whole turn — so a blocking send would wait forever when the server accepts the connection
+	 * but never answers (opencode's per-directory bootstrap can stall). Waiting on the async
+	 * future bounds the handshake without bounding the stream.
+	 */
+	private HttpResponse<InputStream> openEventStream(String path) throws IOException, InterruptedException {
+		HttpRequest request = authorized(HttpRequest.newBuilder(uri(path)))
+				.header("Accept", "text/event-stream").GET().build();
+		CompletableFuture<HttpResponse<InputStream>> pending = http.sendAsync(request, BodyHandlers.ofInputStream());
+		try {
+			return pending.get(EVENT_HEADER_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+		} catch (TimeoutException e) {
+			pending.cancel(true);
+			throw new IOException("opencode did not answer the event subscription within "
+					+ EVENT_HEADER_TIMEOUT.toSeconds() + "s", e);
+		} catch (ExecutionException e) {
+			Throwable cause = e.getCause();
+			throw cause instanceof IOException io ? io
+					: new IOException("Event subscription failed: " + cause.getMessage(), cause);
+		}
+	}
+
+	/**
+	 * End a turn whose events stopped arriving while the server already considers the session
+	 * finished. Without this the reader blocks on a live-but-silent stream forever, which shows
+	 * up as a chat view that stays "Thinking" and refuses further prompts. Both conditions are
+	 * required, so a genuinely long, quiet model call (still {@code busy} server-side) is never
+	 * cut short.
+	 */
+	private void watchForStall(PromptRun run) {
+		long poll = Math.max(200, STREAM_STALL_TIMEOUT.toMillis() / 4);
+		Thread watchdog = new Thread(() -> {
+			while (!run.cancelled && run.stream.get() != null) {
+				try {
+					Thread.sleep(poll);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					return;
+				}
+				if (System.nanoTime() - run.lastEvent.get() < STREAM_STALL_TIMEOUT.toNanos()) continue;
+				if (run.post == null || !run.post.isDone()) continue;
+				if (isSessionRunningOnServer(run.sessionId)) {
+					run.lastEvent.set(System.nanoTime());
+					continue;
+				}
+				run.completedByStatus = true;
+				close(run.stream.get());
+				return;
+			}
+		}, "opencode-stream-watchdog");
+		watchdog.setDaemon(true);
+		watchdog.start();
+	}
+
+	/** True when the server still reports work in flight for {@code sessionId}. */
+	private boolean isSessionRunningOnServer(String sessionId) {
+		try {
+			JsonObject statuses = getSessionStatus();
+			JsonElement status = statuses.get(sessionId);
+			if (status == null || status.isJsonNull()) return false;
+			String type = status.isJsonObject() ? optString(status.getAsJsonObject(), "type", "") : status.getAsString();
+			return !"idle".equalsIgnoreCase(type);
+		} catch (IOException e) {
+			return true; // Unknown: keep waiting rather than ending a live turn.
 		}
 	}
 
@@ -776,8 +1046,14 @@ public final class OpenCodeService {
 
 	private JsonElement send(HttpRequest req, Duration timeout) throws IOException {
 		try {
-			req = HttpRequest.newBuilder(req, (name, value) -> true).timeout(timeout).build();
+			req = authorized(HttpRequest.newBuilder(req,
+					(name, value) -> !name.equalsIgnoreCase("Authorization"))).timeout(timeout).build();
 			HttpResponse<String> resp = http.send(req, BodyHandlers.ofString(StandardCharsets.UTF_8));
+			if (resp.statusCode() == 401 || resp.statusCode() == 403) {
+				throw new IOException("opencode " + req.method() + " " + req.uri().getPath() + " -> "
+						+ resp.statusCode() + ". The server requires a password; make sure "
+						+ "OPENCODE_SERVER_PASSWORD is set in the environment Eclipse runs in.");
+			}
 			if (resp.statusCode() >= 400) {
 				throw new IOException("opencode " + req.method() + " " + req.uri().getPath()
 						+ " -> " + resp.statusCode() + ": " + resp.body());
@@ -795,6 +1071,13 @@ public final class OpenCodeService {
 			throw new IllegalStateException("OpenCode not initialized");
 		}
 		return URI.create(baseUrl + path);
+	}
+
+	/** Attach HTTP basic auth when the server was started with a password. */
+	private HttpRequest.Builder authorized(HttpRequest.Builder builder) {
+		String password = serverPassword;
+		return password == null || password.isBlank() ? builder
+				: builder.header("Authorization", basicAuthHeader(password));
 	}
 
 	private String sessionPath(String path) {

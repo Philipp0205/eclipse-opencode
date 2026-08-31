@@ -24,6 +24,11 @@ final class ChatViewProbe {
 	}
 
 	void run() {
+		// First, and independent of everything below: startup only gets here once the health
+		// handshake succeeded, so a missing version means the server answered something the
+		// plugin no longer understands. The output line records which port it actually took.
+		probe(view.service.getServerVersion() != null, "opencode version reported by health check");
+		System.out.println("[OpenCodeProbe] server: " + view.service.serverOutput().replace('\n', ' '));
 		probe("build".equals(view.selectedAgentName()), "build agent selected");
 		probe(view.modelButton.getText() != null && !view.modelButton.getText().isBlank(), "model selected");
 		probe(view.status.getText().contains("$")

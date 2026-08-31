@@ -9,8 +9,10 @@ trap 'rm -rf "$out"' EXIT
 export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-21}
 export PATH="$HOME/.opencode/bin:$PATH"
 gson=${GSON:-$HOME/.m2/repository/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar}
-swt_api=${SWT_API:-$(ls /usr/share/dbeaver-*/plugins/org.eclipse.swt_[0-9]*.jar 2>/dev/null | head -1)}
-swt_gtk=${SWT_GTK:-$(ls /usr/share/dbeaver-*/plugins/org.eclipse.swt.gtk.linux.x86_64_*.jar 2>/dev/null | head -1)}
+# `|| true`: with `set -o pipefail`, an unmatched glob would otherwise abort the whole run
+# before the first test instead of taking the documented "SWT unavailable" path below.
+swt_api=${SWT_API:-$(ls /usr/share/dbeaver-*/plugins/org.eclipse.swt_[0-9]*.jar 2>/dev/null | head -1 || true)}
+swt_gtk=${SWT_GTK:-$(ls /usr/share/dbeaver-*/plugins/org.eclipse.swt.gtk.linux.x86_64_*.jar 2>/dev/null | head -1 || true)}
 
 echo "== Tycho build =="
 (cd "$root" && ./mvnw -q -B verify)
@@ -41,6 +43,12 @@ javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$her
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.SessionDirectoryListingTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/PermissionRelayTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.PermissionRelayTest
+# Compiled from source, not target/classes: both tests reach package-private startup helpers.
+javac -d "$out" -cp "$gson" "$root/com.opencode.eclipse.core/src/com/opencode/eclipse/core"/*.java \
+	"$here/ServerStartupTest.java" "$here/ServerStreamTest.java"
+java -ea -cp "$out:$gson" com.opencode.eclipse.core.ServerStartupTest
+java -ea -Dopencode.eventTimeoutSeconds=2 -Dopencode.stallTimeoutSeconds=2 \
+	-cp "$out:$gson" com.opencode.eclipse.core.ServerStreamTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" \
 	"$root/com.opencode.eclipse.ui/src/com/opencode/eclipse/ui/SlashCommands.java" "$here/SlashCommandsTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.ui.SlashCommandsTest
@@ -106,9 +114,12 @@ if [[ "${OPENCODE_LIVE_TESTS:-0}" == "1" ]]; then
 	javac -d "$out" -cp "$out:$gson" "$here/SlashCommandLiveTest.java"
 	javac -d "$out" -cp "$out:$gson" "$here/SessionLifecycleLiveTest.java"
 	javac -d "$out" -cp "$out:$gson" "$here/QuestionLiveTest.java"
+	# Needs the CLI, but no provider and no model request.
+	javac -d "$out" -cp "$out:$gson" "$here/ServerPortLiveTest.java"
   workspace=$(mktemp -d)
   trap 'rm -rf "$out" "$workspace"' EXIT
   echo '{"model":"github-copilot/claude-sonnet-4.6"}' > "$workspace/opencode.json"
+  (cd "$workspace" && java -ea -cp "$out:$gson" com.opencode.eclipse.core.ServerPortLiveTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" ItTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" AgenticTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" AbortContinueTest)
