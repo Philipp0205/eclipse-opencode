@@ -114,9 +114,12 @@ if [[ "${OPENCODE_LIVE_TESTS:-0}" == "1" ]]; then
 	javac -d "$out" -cp "$out:$gson" "$here/SlashCommandLiveTest.java"
 	javac -d "$out" -cp "$out:$gson" "$here/SessionLifecycleLiveTest.java"
 	javac -d "$out" -cp "$out:$gson" "$here/QuestionLiveTest.java"
+	# Needs the CLI, but no provider and no model request.
+	javac -d "$out" -cp "$out:$gson" "$here/ServerPortLiveTest.java"
   workspace=$(mktemp -d)
   trap 'rm -rf "$out" "$workspace"' EXIT
   echo '{"model":"github-copilot/claude-sonnet-4.6"}' > "$workspace/opencode.json"
+  (cd "$workspace" && java -ea -cp "$out:$gson" com.opencode.eclipse.core.ServerPortLiveTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" ItTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" AgenticTest)
   (cd "$workspace" && java -ea -cp "$out:$gson" AbortContinueTest)
