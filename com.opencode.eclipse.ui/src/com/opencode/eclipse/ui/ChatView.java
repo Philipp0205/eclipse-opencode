@@ -7,7 +7,6 @@ import java.util.Map;
 
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.graphics.Image;
@@ -37,8 +36,9 @@ import com.opencode.eclipse.core.CommandInfo;
  *
  * <p>Mirrors the VS Code extension's view: session + agent switchers, streaming
  * assistant text, tool-call lines, inline permission prompts, revert and abort.
- * Rendered with native SWT widgets (no Browser) — ponytail: {@link StyledText}
- * with light markdown, not an HTML renderer, until that proves insufficient.
+ * The conversation is rendered in a single SWT {@code Browser} via
+ * {@link ConversationBrowser}; turn orchestration lives in {@link ChatController}
+ * and Eclipse-owned slash commands in {@link CommandRouter}.
  */
 public final class ChatView extends ViewPart {
 	public static final String ID = "com.opencode.eclipse.ui.chatView";
@@ -87,8 +87,6 @@ public final class ChatView extends ViewPart {
 	private Image stopImage;
 	private Image attachImage;
 	int mcpServers;
-	private int lspServers;
-	private int pluginInfoCount;
 	long contextUsed;
 	long contextLimit;
 	double sessionCost;
@@ -97,14 +95,6 @@ public final class ChatView extends ViewPart {
 	private boolean explicitModelOverride;
 	private String lastMonitorStatus;
 	boolean deleting;
-	/** Delegated (subagent / task-tool) child sessions, keyed by their own session id.
-	 * Only running/blocked children are kept — terminal ones are removed immediately so
-	 * the sessions view never shows a finished subagent as still active.
-	 * These are {@code ConcurrentHashMap}s for safe individual reads/writes, but every
-	 * mutation site in this class runs on the SWT UI thread (onEvent, dispose, and the
-	 * reconcileChildSessions background thread only mutates inside ui(...)) — keep it
-	 * that way, since the check-then-act sequences across the two maps are not atomic. */
-	static volatile boolean dashboardRefreshScheduled;
 	private final org.eclipse.core.runtime.preferences.IEclipsePreferences.IPreferenceChangeListener fontListener = event -> {
 		if ("chatFontSize".equals(event.getKey()) && conversation != null && !conversation.isDisposed())
 			conversation.getDisplay().asyncExec(() -> conversation.setChatFontSize(ChatPreferences.fontSize()));
@@ -258,7 +248,7 @@ public final class ChatView extends ViewPart {
 		if (dialog.open() != org.eclipse.jface.window.Window.OK) return;
 		String id = service.getCurrentSessionId();
 		new Thread(() -> {
-			try { service.renameSession(id, dialog.getValue()); refreshSessionsAsync(); }
+			try { service.renameSession(id, dialog.getValue()); refreshSessions(); }
 			catch (Exception ex) { ui(() -> setStatus("Rename failed: " + ex.getMessage())); }
 		}, "opencode-rename").start();
 	}
@@ -293,12 +283,13 @@ public final class ChatView extends ViewPart {
 					JsonArray messages = service.getMessages(service.getCurrentSessionId());
 					JsonArray sessions = service.listSessions();
 					ui(() -> { fillSessions(sessions); renderHistory(messages); workingFolder = service.getCurrentSessionDirectory(); updateStatus(); });
-				} else refreshSessionsAsync();
+				} else refreshSessions();
 			} catch (Exception ex) { ui(() -> setStatus(action + " failed: " + ex.getMessage())); }
 		}, "opencode-session-action").start();
 	}
 
-	void refreshSessionsAsync() {
+	/** Blocking: fetches the session list and marshals the update to the UI thread. Call from a worker. */
+	void refreshSessions() {
 		try { JsonArray sessions = service.listSessions(); ui(() -> fillSessions(sessions)); }
 		catch (Exception ex) { ui(() -> setStatus("Session refresh failed: " + ex.getMessage())); }
 	}
@@ -913,8 +904,6 @@ public final class ChatView extends ViewPart {
 
 	// ---- sending / streaming ---------------------------------------------
 
-	// ---- sending / streaming ---------------------------------------------
-
 	void send() {
 		controller.send();
 	}
@@ -1102,8 +1091,7 @@ public final class ChatView extends ViewPart {
 				+ "\nContext: " + contextUsed + " / " + contextLimit + " tokens\nMCP: " + mcpServers
 				+ " connected\nStatus: " + (busy ? "running" : "ready");
 	}
-	public String sidebarDetails() { return sidebarSnapshot() + "\nLSP: " + lspServers
-				+ " configured\nPlugins / events: " + pluginInfoCount + " commands"; }
+	public String sidebarDetails() { return sidebarSnapshot(); }
 
 	void ui(Runnable r) {
 		Display d = Display.getDefault();

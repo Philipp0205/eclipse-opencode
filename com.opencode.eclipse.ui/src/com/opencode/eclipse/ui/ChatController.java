@@ -121,7 +121,7 @@ final class ChatController {
 				if (turn == view.turnGeneration) {
 					// The CLI may auto-title the session after the first reply; refresh
 					// so the session button/part name/monitor pick up the new title.
-					view.refreshSessionsAsync();
+					view.refreshSessions();
 				}
 			}
 		}, "opencode-prompt").start();
@@ -147,7 +147,7 @@ final class ChatController {
 					JsonArray updated = view.service.listSessions();
 					JsonArray messages = view.service.getMessages(current);
 					view.ui(() -> { view.fillSessions(updated); view.renderHistory(messages); });
-				} else view.refreshSessionsAsync();
+				} else view.refreshSessions();
 			} catch (Exception ex) {
 				view.ui(() -> view.setStatus("Session refresh failed: " + ex.getMessage()));
 			}
@@ -193,9 +193,7 @@ final class ChatController {
 				}
 				String key = ChatView.str(part, "id");
 				if (key == null) key = ChatView.toolKey(part);
-				synchronized (view.liveParts) {
-					view.liveParts.computeIfAbsent(mid, ignored -> new LinkedHashMap<>()).put(key, part.deepCopy());
-				}
+				view.liveParts.computeIfAbsent(mid, ignored -> new LinkedHashMap<>()).put(key, part.deepCopy());
 				renderLiveMessage(mid);
 			}
 		}
@@ -336,12 +334,8 @@ final class ChatController {
 	}
 
 	private void renderLiveMessage(String messageId, boolean expandReasoning) {
-		LinkedHashMap<String, JsonObject> parts;
-		synchronized (view.liveParts) {
-			parts = view.liveParts.get(messageId);
-			if (parts == null || parts.isEmpty()) return;
-			parts = new LinkedHashMap<>(parts);
-		}
+		LinkedHashMap<String, JsonObject> parts = view.liveParts.get(messageId);
+		if (parts == null || parts.isEmpty()) return;
 		JsonArray array = new JsonArray();
 		parts.values().forEach(array::add);
 		view.conversation.putMessageHtml(messageId,
