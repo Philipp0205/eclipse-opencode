@@ -109,7 +109,7 @@ final class CommandRouter {
 		new Thread(() -> {
 			try {
 				view.service.renameSession(id, title.trim());
-				view.refreshSessionsAsync();
+				view.refreshSessions();
 			} catch (Exception ex) {
 				view.ui(() -> view.setStatus("Rename failed: " + ex.getMessage()));
 			}
