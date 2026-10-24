@@ -45,6 +45,12 @@ For probe-style regression checks specifically, prefer adding a new `probe*`/`pr
 
 The whole-view probe must run from an Eclipse workspace with the PDE projects imported and target platform resolved. It starts a real OpenCode server, sends model prompts, creates `whole_view_probe.txt` in its runtime workspace, and exercises Eclipse Compare. The ordinary harness remains the default because it is deterministic apart from optional SWT availability; live tests and the probe are escalation checks, not routine tests.
 
+## Isolated End-To-End Test (Docker)
+
+- `test/e2e/run.sh` builds the plugin in Docker, installs it via p2 into a stock Eclipse (`ECLIPSE_RELEASE`, default 2026-03) on a virtual Xvfb display, runs the whole-view probe (`-Dopencode.wholeViewProbe=true`) with real model requests and exits 0 only on `[OpenCodeProbe] WHOLE VIEW OK`. Nothing opens on the host desktop, so prefer it over the host probe launch.
+- Provide credentials via `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/etc. (+ `E2E_MODEL=provider/model`) or `E2E_AUTH_DIR` (an opencode data dir copy). Output (console log, screenshots) lands in `test/e2e/out/`; `E2E_VNC=1` exposes the screen on port 5900.
+- This setup was written without network access and has not yet been run; fix the Dockerfile on first real run (Eclipse download URL, WebKitGTK package names).
+
 ## Local Dev Install After Non-Trivial Tasks
 
 - After finishing any non-trivial task (multi-file change, bug fix, or feature — not a trivial one-line/typo edit), bump the semantic plugin version, build the jar, and auto-install the plugin into the local IDE at `~/.eclipse_ide/advantest_ide_438_RH9` via its `dropins`/`plugins` folder, without waiting for a full release.

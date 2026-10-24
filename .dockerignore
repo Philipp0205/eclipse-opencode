@@ -1,0 +1,3 @@
+.git
+**/target
+test/e2e/out
