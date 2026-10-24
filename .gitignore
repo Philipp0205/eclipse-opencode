@@ -4,3 +4,4 @@ runtime-opencode/
 com.opencode.eclipse.ui/src/test.json
 .slim/deepwork/
 .settings/
+test/e2e/out/
