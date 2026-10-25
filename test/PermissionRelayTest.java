@@ -3,40 +3,45 @@ package com.opencode.eclipse.core;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
 
 public final class PermissionRelayTest {
 	public static void main(String[] args) throws Exception {
-		Path directory = Files.createTempDirectory("permission-scope");
 		HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-		server.createContext("/permission/p1/reply", exchange -> {
-			String expected = "directory=" + java.net.URLEncoder.encode(directory.toRealPath().toString(), StandardCharsets.UTF_8);
-			assert expected.equals(exchange.getRequestURI().getRawQuery()) : exchange.getRequestURI();
+		boolean[] replied = { false };
+		server.createContext("/api/permission/request", exchange -> {
+			byte[] body = "{\"data\":[{\"id\":\"per_1\",\"sessionID\":\"child\",\"action\":\"shell\",\"resources\":[\"ls\"]}]}"
+					.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var out = exchange.getResponseBody()) { out.write(body); }
+		});
+		server.createContext("/api/session/child/permission/per_1/reply", exchange -> {
+			JsonObject body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),
+					StandardCharsets.UTF_8)).getAsJsonObject();
+			assert "once".equals(body.get("decision").getAsString());
+			replied[0] = true;
 			exchange.sendResponseHeaders(200, 0); exchange.close();
 		});
 		server.start();
 		try {
 			OpenCodeService service = new OpenCodeService();
 			set(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-			service.respondToPermission("p1", "once", directory.toString());
-			JsonObject childPermission = new JsonObject(); childPermission.addProperty("sessionID", "child");
-			childPermission.addProperty("id", "p1");
-			OpenCodeEvent event = new OpenCodeEvent("permission.asked", new JsonObject());
+			service.respondToPermission("per_1", "once", "/tmp");
+			assert replied[0];
+			JsonObject request = new JsonObject(); request.addProperty("sessionID", "child");
+			request.addProperty("id", "per_1"); request.addProperty("action", "shell");
+			OpenCodeEvent event = V2.permission(request, "/tmp");
+			assert "shell".equals(event.raw().getAsJsonObject("properties").get("permission").getAsString());
 			Set<String> children = new HashSet<>(); children.add("child");
-			assert OpenCodeService.isForwardableEvent(eventWithSession(event, childPermission), "root", children);
+			assert OpenCodeService.isForwardableEvent(event, "root", children);
 			service.dispose();
-		} finally { server.stop(0); Files.deleteIfExists(directory); }
+		} finally { server.stop(0); }
 		System.out.println("PERMISSION RELAY OK");
-	}
-	private static OpenCodeEvent eventWithSession(OpenCodeEvent ignored, JsonObject permission) {
-		JsonObject raw = new JsonObject(); raw.addProperty("type", "permission.asked"); raw.add("properties", permission);
-		return new OpenCodeEvent("permission.asked", raw);
 	}
 	private static void set(OpenCodeService service, String name, String value) throws Exception {
 		Field f = OpenCodeService.class.getDeclaredField(name); f.setAccessible(true); f.set(service, value);

@@ -67,22 +67,27 @@ The whole-view probe must run from an Eclipse workspace with the PDE projects im
 ## Architecture
 
 - This is a five-module Eclipse Tycho build. `com.opencode.eclipse.target/opencode.target` is the dependency source of truth; the root `pom.xml` targets Linux, macOS, and Windows.
-- `com.opencode.eclipse.core/OpenCodeService` owns the `opencode serve` process and the REST/SSE protocol. It deliberately forces HTTP/1.1 because the JDK HTTP/2 upgrade hangs against OpenCode.
+- The plugin supports only the OpenCode V2 server API (`/api/...`, verified against opencode 2.1.4); V1 support was dropped. The authoritative contract is the running server's `/openapi.json` (needs auth); SSE event payloads are not in the spec, so capture them live from `GET /api/event` before relying on new ones.
+- `com.opencode.eclipse.core/OpenCodeService` owns the `opencode serve` process and the REST/SSE protocol. It deliberately forces HTTP/1.1 because the JDK HTTP/2 upgrade hangs against OpenCode. V2 `serve` prints `server password <secret>`; every request (REST and SSE) must send HTTP Basic auth `opencode:<secret>`.
+- `com.opencode.eclipse.core/V2` converts V2 payloads to the `{info, parts}` messages and `message.updated` / `message.part.updated` / `session.status` / `session.error` / `permission.asked` / `question.asked` / `file.edited` events the UI renders. Keep V2 JSON shapes out of the UI; translate them there.
+- Live rendering refetches `GET /api/session/{id}/message/{messageID}` (throttled) on `session.*` content events and overlays accumulated `session.text.delta`/`session.reasoning.delta` text, because stored text lags behind the stream. `session.step.ended.files` drives `file.edited`; `session.execution.succeeded|failed|interrupted` ends a turn.
+- A freshly started V2 server answers location-scoped lists (agents, commands) empty or partial for a moment; `initialize` waits for them to settle.
 - `com.opencode.eclipse.ui/ChatView` owns SWT state and worker/UI-thread handoff. Conversation rendering flows through `ConversationHtml` into one SWT `Browser` managed by `ConversationBrowser`; its packaged page assets are in `resources/`.
 - Multiple ChatView secondary instances each own an independent OpenCodeService/process. `SessionMonitorView` tracks live chat views and activates the selected one; status precedence is blocked, running, then done.
-- Session creation/listing is scoped with OpenCode's `directory` query to the Eclipse workspace root. Preserve this when adding session endpoints.
+- Sessions are created with a body `location.directory` and listed with the `directory` filter of `GET /api/session`; sessions carry their own `location`, so per-session calls need no directory. Location-scoped endpoints (agents, commands, skills, models, providers, MCP, pending permissions/forms) take the deepObject query `location[directory]=`.
+- The agent and model are per-session state in V2 (`POST /api/session/{id}/agent` and `/model`), applied before each prompt; prompt/command bodies carry no model or agent.
 - When `ENV_SCM_WORKSPACE_ROOT` is set, it replaces the Eclipse workspace root for the OpenCode process and all directory-scoped APIs, including the session list.
 - The selected session's returned `directory` is the status-line working folder. Keep session IDs out of the selector; expose them only in the selectable Info dialog.
-- OpenCode prompt runs are isolated per session. Prompt POST failures must close SSE; completion accepts current `session.status=idle` plus the legacy `session.idle` fallback.
+- OpenCode prompt runs are isolated per session. Prompt POST failures must close SSE; completion is the synthesized `session.status=idle` emitted when V2 reports the root session's execution ended.
 - Only mutate ChatView conversation/session state on the SWT thread. Worker callbacks must marshal through `ui(...)` and validate the turn/session they belong to.
 - Queued prompts are local immutable snapshots of text, selected agent, and attachments. OpenCode does not provide a durable server queue.
-- `/command` is authoritative for project commands, skills, and MCP prompts. Eclipse-owned commands (`/models`, `/sessions`, `/compact`, etc.) are intentionally maintained separately; never expand OpenCode command templates locally.
+- `GET /api/command` plus `GET /api/skill` are authoritative for project commands and skills; skills run as a prompt with a `skills` attachment, commands through `POST /api/session/{id}/command`. Eclipse-owned commands (`/models`, `/sessions`, `/compact`, etc.) are intentionally maintained separately; never expand OpenCode command templates locally.
 - Slash completion must never steal focus from the prompt. Keep its popup non-focusable, update filtering from prompt Modify events, and commit keyboard selection through the prompt key listener.
 - Internal OpenCode agents have `hidden=true`; never expose them in the agent selector.
 - The Browser renderer is the only conversation renderer. Do not reintroduce one SWT control per message: GTK stops painting deep native child controls in long histories.
 - File review snapshots edit/write tool targets before modification where possible, uses Git HEAD for tracked-file fallback, and opens Compare once per changed file at turn completion.
-- At turn completion, fetch authoritative `GET /session/{id}/diff` data (scoped by directory) before reviewing changes. `file.edited` alone is insufficient because events or tool paths may be missing.
-- Permission and question list/reply endpoints must include the workspace `directory` query. Question radio controls need a separate SWT parent per question so groups do not interfere.
+- At turn completion, fetch authoritative `GET /api/session/{id}/diff` data before reviewing changes. `file.edited` alone is insufficient because events or tool paths may be missing.
+- V2 replaces questions with forms (`form.created`, `GET /api/form`, `POST /api/session/{id}/form/{formID}/reply` with `{answer: {fieldKey: value}}`); string/multiselect fields map to the question dialog. Permission replies go to `POST /api/session/{id}/permission/{requestID}/reply` with `{decision}`. Session sharing does not exist in V2 and was removed. Question radio controls need a separate SWT parent per question so groups do not interfere.
 - Permission prompts offer Always / Once / Never. `PermissionDecisions` persists Always and Never in Eclipse preferences keyed by a hash of directory + permission + patterns, and later matching requests are answered without a dialog; OpenCode's own "always" only lasts as long as its server process. Never persist "once" or a dismissed dialog, and keep `/permissions` as the way to forget stored answers.
 - Global `opencode.json` is external to the Eclipse workspace. Resolve it through `OPENCODE_CONFIG`, XDG, macOS Application Support, or APPDATA, and explicitly open it with `org.eclipse.ui.DefaultTextEditor` using `FileStoreEditorInput`.
 - The active editor is attached by default; **All open tabs** opt-in attaches every open workspace and external editor. Refresh attachment chips on editor open/close/activation; preserve selected text, dirty document contents, and Eclipse problem markers in queued prompt snapshots.
@@ -94,9 +99,9 @@ The whole-view probe must run from an Eclipse workspace with the PDE projects im
 ## Runtime Checks
 
 - The plugin requires `opencode` on `PATH`; each `OpenCodeService` instance starts `opencode serve --port 0 --hostname 127.0.0.1` in the Eclipse workspace and kills it on disposal.
-- Provider setup is detected through `GET /provider`; no connected provider must produce setup guidance rather than a broken prompt.
+- Provider setup is detected through `GET /api/provider`; no connected provider must produce setup guidance rather than a broken prompt.
 - The status line shows `cost · context percent · session folder`. Session ID, full folder, token details, cost, and MCP count belong in the selectable Info dialog.
-- The todo/task-list surface was removed deliberately (the panel could not be cleared once early todos completed). Do not reintroduce `TodoPanel`, `todo.updated` handling, `GET /session/{id}/todo`, or special `todowrite`/`todoread` rendering; those tool calls render as ordinary tool cards.
+- The todo/task-list surface was removed deliberately (the panel could not be cleared once early todos completed). Do not reintroduce `TodoPanel`, todo event handling, todo endpoints, or special `todowrite`/`todoread` rendering; those tool calls render as ordinary tool cards.
 - Run the plugin with `com.opencode.eclipse.ui/launch/opencode.launch` after importing the PDE projects and resolving the target platform.
 - The whole-view probe is `com.opencode.eclipse.ui/launch/opencode-whole-view-probe.launch`; success is `[OpenCodeProbe] WHOLE VIEW OK` in the launch console.
 - Linux SWT Browser rendering requires WebKitGTK; without it the chat view displays a startup error.

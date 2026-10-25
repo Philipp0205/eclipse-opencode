@@ -47,7 +47,7 @@ public class ItTest {
 				var d = e!=null?e.getAsJsonObject("data"):null;
 				error.append(d!=null?str(d,"message"):str(e,"name"));
 			}
-			case "session.idle" -> idle[0]=true;
+			case "session.status" -> { if (ev.isIdle()) idle[0]=true; }
 			default -> {}
 			}
 		}, null, null);
