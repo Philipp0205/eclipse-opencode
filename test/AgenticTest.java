@@ -29,7 +29,7 @@ public class AgenticTest {
 					var f = ev.raw().getAsJsonObject("properties");
 					edited.add(f!=null?str(f,"file"):null);
 				}
-				if (ev.type().equals("session.idle")) idle[0]=true;
+				if (ev.isIdle()) idle[0]=true;
 			}, null, null);
 
 		System.out.println("idle=" + idle[0] + " edited=" + edited);

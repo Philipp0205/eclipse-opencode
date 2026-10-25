@@ -221,8 +221,6 @@ public final class ChatView extends ViewPart {
 		rename.addListener(SWT.Selection, e -> renameSession());
 		MenuItem fork = new MenuItem(menu, SWT.PUSH); fork.setText("Fork session");
 		fork.addListener(SWT.Selection, e -> sessionAction("fork"));
-		MenuItem share = new MenuItem(menu, SWT.PUSH); share.setText("Share and copy URL");
-		share.addListener(SWT.Selection, e -> sessionAction("share"));
 		MenuItem unrevert = new MenuItem(menu, SWT.PUSH); unrevert.setText("Unrevert");
 		unrevert.addListener(SWT.Selection, e -> sessionAction("unrevert"));
 		new MenuItem(menu, SWT.SEPARATOR);
@@ -279,14 +277,9 @@ public final class ChatView extends ViewPart {
 			try {
 				JsonObject session = switch (action) {
 					case "fork" -> service.forkSession(id, null);
-					case "share" -> service.shareSession(id);
 					case "unrevert" -> service.unrevertSession(id);
 					default -> throw new IllegalArgumentException(action);
 				};
-				if ("share".equals(action) && session.has("share")) {
-					String url = str(session.getAsJsonObject("share"), "url");
-					ui(() -> copyToClipboard(url));
-				}
 				if ("fork".equals(action)) {
 					service.switchSession(str(session, "id"));
 					sessionRestore.persist(service.getCurrentSessionId(), service.getCurrentSessionDirectory());
@@ -301,13 +294,6 @@ public final class ChatView extends ViewPart {
 	void refreshSessionsAsync() {
 		try { JsonArray sessions = service.listSessions(); ui(() -> fillSessions(sessions)); }
 		catch (Exception ex) { ui(() -> setStatus("Session refresh failed: " + ex.getMessage())); }
-	}
-
-	private void copyToClipboard(String text) {
-		if (text == null) return;
-		org.eclipse.swt.dnd.Clipboard clipboard = new org.eclipse.swt.dnd.Clipboard(getSite().getShell().getDisplay());
-		try { clipboard.setContents(new Object[] { text }, new org.eclipse.swt.dnd.Transfer[] {
-				org.eclipse.swt.dnd.TextTransfer.getInstance() }); } finally { clipboard.dispose(); }
 	}
 
 	/**

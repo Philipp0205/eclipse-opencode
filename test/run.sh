@@ -37,6 +37,8 @@ java -ea -cp "$out:$gson" com.opencode.eclipse.ui.WorkspaceRootTest
 java -ea -cp "$out:$gson" com.opencode.eclipse.ui.AttachmentSelectionTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/OpenCodeRequestBodyTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.OpenCodeRequestBodyTest
+javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/V2TranslationTest.java"
+java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.V2TranslationTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/SessionDirectoryListingTest.java"
 java -ea -cp "$out:$gson:$root/com.opencode.eclipse.core/target/classes" com.opencode.eclipse.core.SessionDirectoryListingTest
 javac -d "$out" -cp "$gson:$root/com.opencode.eclipse.core/target/classes" "$here/PermissionRelayTest.java"
